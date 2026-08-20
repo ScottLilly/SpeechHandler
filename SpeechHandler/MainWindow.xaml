@@ -70,7 +70,8 @@
                           SelectionChanged="InstalledModelCombo_SelectionChanged"/>
             </Grid>
 
-            <TabControl Grid.Row="1" Margin="0,0,0,12" TabStripPlacement="Left">
+            <TabControl Grid.Row="1" Margin="0,0,0,12" Style="{StaticResource SourceTabControl}"
+                        ItemContainerStyle="{StaticResource SourceTabItem}">
                 <TabItem>
                     <TabItem.Header>
                         <TextBlock Text="Audio file" TextWrapping="Wrap" TextAlignment="Center"
@@ -171,16 +172,38 @@
                     </DockPanel>
                     <TextBlock x:Name="PartialText" DockPanel.Dock="Bottom" Style="{StaticResource MutedText}"
                                FontStyle="Italic" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                    <AdornerDecorator>
-                        <TextBox x:Name="TranscriptBox"
-                                 AcceptsReturn="True"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Disabled"
-                                 FontSize="15"
-                                 SpellCheck.IsEnabled="True"
-                                 Language="en-US"/>
-                    </AdornerDecorator>
+                    <TabControl x:Name="TranscriptViewTabs" Style="{StaticResource ContentTabControl}"
+                                ItemContainerStyle="{StaticResource ContentTabItem}">
+                        <TabItem Header="Transcript">
+                            <AdornerDecorator>
+                                <TextBox x:Name="TranscriptBox"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalAlignment="Stretch"
+                                         HorizontalAlignment="Stretch"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Disabled"
+                                         FontSize="15"
+                                         SpellCheck.IsEnabled="True"
+                                         Language="en-US"/>
+                            </AdornerDecorator>
+                        </TabItem>
+                        <TabItem Header="Subtitles (SRT)">
+                            <AdornerDecorator>
+                                <TextBox x:Name="SrtBox"
+                                         AcceptsReturn="True"
+                                         TextWrapping="NoWrap"
+                                         VerticalAlignment="Stretch"
+                                         HorizontalAlignment="Stretch"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto"
+                                         FontSize="14"
+                                         FontFamily="Consolas"
+                                         SpellCheck.IsEnabled="True"
+                                         Language="en-US"/>
+                            </AdornerDecorator>
+                        </TabItem>
+                    </TabControl>
                 </DockPanel>
             </Border>
 

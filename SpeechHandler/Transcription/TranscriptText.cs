@@ -25,6 +25,196 @@ internal static class TranscriptText
         return new PreparedTranscript(alignedExisting, alignedIncoming);
     }
 
+    public static List<TimedWord> PrepareWords(
+        List<TimedWord> existing,
+        IReadOnlyList<TimedWord> incoming,
+        string existingText,
+        bool formatAsSentences)
+    {
+        var alignedIncoming = incoming
+            .Where(word => !string.IsNullOrWhiteSpace(word.Text))
+            .Select(word => word with { Text = word.Text.Trim() })
+            .ToList();
+        AlignWordOverlap(existing, alignedIncoming);
+        ApplyPausePunctuation(existing, alignedIncoming);
+        if (formatAsSentences)
+        {
+            var prior = existing.Count > 0 ? existing[^1].Text : existingText.TrimEnd();
+            FormatWordList(alignedIncoming, prior);
+        }
+
+        return alignedIncoming;
+    }
+
+    internal static void AlignWordOverlap(List<TimedWord> existing, List<TimedWord> incoming)
+    {
+        if (existing.Count == 0 || incoming.Count == 0)
+        {
+            return;
+        }
+
+        var lastWord = existing[^1].Text;
+        var firstWord = incoming[0].Text;
+        var lastCore = CoreWord(lastWord);
+        var firstCore = CoreWord(firstWord);
+        if (lastCore.Length == 0 || firstCore.Length == 0)
+        {
+            return;
+        }
+
+        if (lastCore.Equals(firstCore, StringComparison.OrdinalIgnoreCase))
+        {
+            incoming.RemoveAt(0);
+            return;
+        }
+
+        if (firstCore.Length <= 3
+            && firstCore.Length < lastCore.Length
+            && lastCore.EndsWith(firstCore, StringComparison.OrdinalIgnoreCase)
+            && !ProtectedShortWords.Contains(firstCore))
+        {
+            incoming.RemoveAt(0);
+            return;
+        }
+
+        if (lastCore.Length >= 2
+            && lastCore.Length < firstCore.Length
+            && firstCore.StartsWith(lastCore, StringComparison.OrdinalIgnoreCase)
+            && !ProtectedShortWords.Contains(lastCore))
+        {
+            existing[^1] = incoming[0];
+            incoming.RemoveAt(0);
+        }
+    }
+
+    internal static List<TimedWord> StripPrefixWords(IReadOnlyList<TimedWord> words, string prefix)
+    {
+        prefix = prefix.Trim();
+        if (prefix.Length == 0 || words.Count == 0)
+        {
+            return words.ToList();
+        }
+
+        var consumed = 0;
+        var index = 0;
+        while (index < words.Count && consumed < prefix.Length)
+        {
+            while (consumed < prefix.Length && char.IsWhiteSpace(prefix[consumed]))
+            {
+                consumed++;
+            }
+
+            if (consumed >= prefix.Length)
+            {
+                break;
+            }
+
+            var token = words[index].Text.Trim();
+            if (token.Length == 0)
+            {
+                index++;
+                continue;
+            }
+
+            if (prefix.AsSpan(consumed).StartsWith(token, StringComparison.OrdinalIgnoreCase))
+            {
+                consumed += token.Length;
+                index++;
+                continue;
+            }
+
+            break;
+        }
+
+        return words.Skip(index).ToList();
+    }
+
+    internal static IReadOnlyList<TimedWord> Offset(IReadOnlyList<TimedWord> words, double seconds)
+    {
+        if (seconds == 0 || words.Count == 0)
+        {
+            return words;
+        }
+
+        return words
+            .Select(word => word with
+            {
+                StartSeconds = word.StartSeconds + seconds,
+                EndSeconds = word.EndSeconds + seconds
+            })
+            .ToList();
+    }
+
+    private static void ApplyPausePunctuation(List<TimedWord> existing, List<TimedWord> incoming)
+    {
+        if (incoming.Count == 0)
+        {
+            return;
+        }
+
+        if (existing.Count > 0)
+        {
+            MaybeAppendPeriod(existing, existing.Count - 1, incoming[0].StartSeconds);
+        }
+
+        for (var i = 1; i < incoming.Count; i++)
+        {
+            MaybeAppendPeriod(incoming, i - 1, incoming[i].StartSeconds);
+        }
+    }
+
+    private static void MaybeAppendPeriod(List<TimedWord> words, int index, double nextStart)
+    {
+        var previous = words[index];
+        if (nextStart - previous.EndSeconds < 0.7)
+        {
+            return;
+        }
+
+        var text = previous.Text.TrimEnd();
+        if (text.Length > 0 && text[^1] is not '.' and not '!' and not '?')
+        {
+            words[index] = previous with { Text = text + "." };
+        }
+    }
+
+    private static void FormatWordList(List<TimedWord> words, string existingText)
+    {
+        var capitalizeNext = existingText.Length == 0 || EndsWithSentencePunctuation(existingText);
+        for (var i = 0; i < words.Count; i++)
+        {
+            var text = words[i].Text;
+            text = ReplaceStandaloneI(text);
+            if (capitalizeNext)
+            {
+                text = CapitalizeFirstLetter(text);
+            }
+
+            words[i] = words[i] with { Text = text };
+            capitalizeNext = EndsWithSentencePunctuation(text);
+        }
+    }
+
+    private static string ReplaceStandaloneI(string text)
+    {
+        return Regex.Replace(text, @"\bi\b", "I");
+    }
+
+    private static string CapitalizeFirstLetter(string text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (char.IsLetter(text[i]))
+            {
+                var chars = text.ToCharArray();
+                chars[i] = char.ToUpperInvariant(chars[i]);
+                return new string(chars);
+            }
+        }
+
+        return text;
+    }
+
     public static string FormatAsSentences(string text, string existing)
     {
         text = text.Trim();
@@ -170,7 +360,7 @@ internal static class TranscriptText
         return text[start..end];
     }
 
-    private static string CoreWord(string word)
+    internal static string CoreWord(string word)
     {
         var start = 0;
         var end = word.Length;
@@ -185,6 +375,28 @@ internal static class TranscriptText
         }
 
         return word[start..end];
+    }
+
+    internal static string ReplaceCoreWord(string token, string original, string replacement)
+    {
+        var start = 0;
+        var end = token.Length;
+        while (start < end && IsWordPunctuation(token[start]))
+        {
+            start++;
+        }
+
+        while (end > start && IsWordPunctuation(token[end - 1]))
+        {
+            end--;
+        }
+
+        if (!token[start..end].Equals(original, StringComparison.Ordinal))
+        {
+            return token;
+        }
+
+        return token[..start] + replacement + token[end..];
     }
 
     private static bool IsWordPunctuation(char c) =>

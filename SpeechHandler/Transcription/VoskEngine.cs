@@ -65,26 +65,26 @@ internal sealed class VoskSession : IDisposable
         _recognizer.SetWords(true);
     }
 
-    public bool Accept(byte[] data, int length, out string? finalText, out string? partialText)
+    public bool Accept(byte[] data, int length, out TranscriptionResult? final, out string? partialText)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (_recognizer.AcceptWaveform(data, length))
         {
-            finalText = ReadResultText(_recognizer.Result());
+            final = ReadResult(_recognizer.Result());
             partialText = null;
             return true;
         }
 
-        finalText = null;
+        final = null;
         partialText = ReadJsonString(_recognizer.PartialResult(), "partial");
         return false;
     }
 
-    public string? Finish()
+    public TranscriptionResult? Finish()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return ReadResultText(_recognizer.FinalResult());
+        return ReadResult(_recognizer.FinalResult());
     }
 
     public void Dispose()
@@ -98,7 +98,7 @@ internal sealed class VoskSession : IDisposable
         _recognizer.Dispose();
     }
 
-    private static string? ReadResultText(string json)
+    private static TranscriptionResult? ReadResult(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -107,12 +107,13 @@ internal sealed class VoskSession : IDisposable
 
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        if (root.TryGetProperty("result", out var words) && words.ValueKind == JsonValueKind.Array)
+        var words = ReadWords(root);
+        if (words.Count > 0)
         {
             var fromWords = BuildTextFromWords(words);
             if (!string.IsNullOrWhiteSpace(fromWords))
             {
-                return fromWords;
+                return new TranscriptionResult(fromWords, words);
             }
         }
 
@@ -122,13 +123,17 @@ internal sealed class VoskSession : IDisposable
         }
 
         var text = value.GetString();
-        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : new TranscriptionResult(text.Trim(), words);
     }
 
-    private static string BuildTextFromWords(JsonElement words)
+    private static List<TimedWord> ReadWords(JsonElement root)
     {
-        var builder = new StringBuilder();
-        var lastEnd = -1.0;
+        if (!root.TryGetProperty("result", out var words) || words.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var list = new List<TimedWord>();
         foreach (var word in words.EnumerateArray())
         {
             if (!word.TryGetProperty("word", out var tokenElement))
@@ -144,21 +149,38 @@ internal sealed class VoskSession : IDisposable
 
             var start = word.TryGetProperty("start", out var startElement)
                 ? startElement.GetDouble()
-                : -1;
+                : list.Count > 0 ? list[^1].EndSeconds : 0;
+            var end = word.TryGetProperty("end", out var endElement)
+                ? endElement.GetDouble()
+                : start;
+            if (end < start)
+            {
+                end = start;
+            }
 
+            list.Add(new TimedWord(token.Trim(), start, end));
+        }
+
+        return list;
+    }
+
+    private static string BuildTextFromWords(IReadOnlyList<TimedWord> words)
+    {
+        var builder = new StringBuilder();
+        var lastEnd = -1.0;
+        foreach (var word in words)
+        {
             if (builder.Length > 0)
             {
                 // A long pause inside an utterance is a reliable sentence break.
                 // Commas are not: pauses and comma placement often disagree.
-                builder.Append(lastEnd >= 0 && start >= 0 && start - lastEnd >= 0.7
+                builder.Append(lastEnd >= 0 && word.StartSeconds - lastEnd >= 0.7
                     ? ". "
                     : " ");
             }
 
-            builder.Append(token);
-            lastEnd = word.TryGetProperty("end", out var endElement)
-                ? endElement.GetDouble()
-                : start;
+            builder.Append(word.Text);
+            lastEnd = word.EndSeconds;
         }
 
         return builder.ToString();

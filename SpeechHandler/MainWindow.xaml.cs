@@ -41,6 +41,9 @@ public partial class MainWindow : Window
     private string _elevenLabsKey = string.Empty;
     private bool _suppressLanguageSelection;
     private bool _suppressInstalledModelSelection;
+    private readonly List<TimedWord> _timedWords = [];
+    private double _sessionTimeOffset;
+    private long _liveApiPcmBytes;
 
     private const string OpenAiLanguage = "OpenAI Whisper";
     private const string ElevenLabsLanguage = "ElevenLabs";
@@ -49,6 +52,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         TranscriptSpelling.Attach(TranscriptBox);
+        TranscriptSpelling.Attach(SrtBox, skipSrtMetadata: true);
+        TranscriptSpelling.WordCorrected = SyncSpellingCorrection;
         TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
         LoadSettingsIntoUi();
 
@@ -129,7 +134,7 @@ public partial class MainWindow : Window
             var language = ResolveCurrentLanguage(installed, languages);
             LanguageCombo.SelectedItem = language;
             FillModelCombo(language, installed, persist: false);
-            TranscriptSpelling.ApplyLanguage(TranscriptBox, language);
+            ApplyTranscriptLanguage(language);
         }
         finally
         {
@@ -266,7 +271,7 @@ public partial class MainWindow : Window
         {
             var language = LanguageCombo.SelectedItem as string;
             FillModelCombo(language, installed, persist: true);
-            TranscriptSpelling.ApplyLanguage(TranscriptBox, language);
+            ApplyTranscriptLanguage(language);
         }
         finally
         {
@@ -344,6 +349,8 @@ public partial class MainWindow : Window
             }
 
             _lastFinalRaw = null;
+            _sessionTimeOffset = NextSessionTimeOffset();
+            _liveApiPcmBytes = 0;
 
             _capture = new LiveAudioCapture(source.Id, source.Kind);
             _capture.PcmAvailable += OnLivePcm;
@@ -408,14 +415,15 @@ public partial class MainWindow : Window
         {
             if (vosk is not null)
             {
-                AppendFinal(vosk.Finish(), formatAsSentences: true);
+                AppendFinal(vosk.Finish(), formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset);
                 vosk.Dispose();
             }
             else if (apiBuffer is { Length: > 0 })
             {
                 var pcm = apiBuffer.ToArray();
+                var offset = _sessionTimeOffset + PcmDurationSeconds(_liveApiPcmBytes);
                 apiBuffer.Dispose();
-                await TranscribeApiChunkAsync(pcm, _workCts?.Token ?? CancellationToken.None);
+                await TranscribeApiChunkAsync(pcm, offset, _workCts?.Token ?? CancellationToken.None);
             }
             else
             {
@@ -467,6 +475,7 @@ public partial class MainWindow : Window
         var path = _selectedAudioFile;
         var cts = BeginWork("Processing audio file…");
         _lastFinalRaw = null;
+        _sessionTimeOffset = NextSessionTimeOffset();
         try
         {
             if (UseLocalEngine)
@@ -529,23 +538,30 @@ public partial class MainWindow : Window
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
-        var text = TranscriptBox.Text;
+        var srt = SrtTabSelected;
+        var text = srt ? SrtBox.Text : TranscriptBox.Text;
         if (string.IsNullOrEmpty(text))
         {
             return;
         }
 
         Clipboard.SetText(text);
-        SetStatus("Copied transcript to the clipboard.", IdleBrush);
+        SetStatus(srt ? "Copied subtitles to the clipboard." : "Copied transcript to the clipboard.", IdleBrush);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        var srtSelected = SrtTabSelected;
+        var baseName = !string.IsNullOrWhiteSpace(_selectedAudioFile)
+            ? Path.GetFileNameWithoutExtension(_selectedAudioFile)
+            : $"transcript-{DateTime.Now:yyyyMMdd-HHmmss}";
         var dialog = new SaveFileDialog
         {
-            Title = "Save transcript",
-            Filter = "Text files|*.txt|All files|*.*",
-            FileName = $"transcript-{DateTime.Now:yyyyMMdd-HHmmss}.txt"
+            Title = srtSelected ? "Save subtitles" : "Save transcript",
+            Filter = srtSelected
+                ? "SubRip subtitles|*.srt|Text files|*.txt|All files|*.*"
+                : "Text files|*.txt|SubRip subtitles|*.srt|All files|*.*",
+            FileName = srtSelected ? $"{baseName}.srt" : $"{baseName}.txt"
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -553,13 +569,29 @@ public partial class MainWindow : Window
             return;
         }
 
-        File.WriteAllText(dialog.FileName, TranscriptBox.Text, Encoding.UTF8);
-        SetStatus("Saved transcript.", IdleBrush);
+        var saveSrt = string.Equals(Path.GetExtension(dialog.FileName), ".srt", StringComparison.OrdinalIgnoreCase);
+        var text = saveSrt ? SrtBox.Text : TranscriptBox.Text;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            MessageBox.Show(
+                this,
+                saveSrt ? "There are no subtitles to save yet." : "There is no transcript to save yet.",
+                "Speech Handler",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var encoding = saveSrt ? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false) : Encoding.UTF8;
+        File.WriteAllText(dialog.FileName, text, encoding);
+        SetStatus(saveSrt ? "Saved subtitles." : "Saved transcript.", IdleBrush);
     }
 
     private void Clear_Click(object sender, RoutedEventArgs e)
     {
         TranscriptBox.Clear();
+        SrtBox.Clear();
+        _timedWords.Clear();
         PartialText.Text = string.Empty;
         _lastFinalRaw = null;
         if (!_isLive && !_busy)
@@ -742,7 +774,7 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
                 if (session.Accept(buffer, read, out var final, out var partial))
                 {
-                    Dispatcher.Invoke(() => AppendFinal(final, formatAsSentences: true));
+                    Dispatcher.Invoke(() => AppendFinal(final, formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset));
                 }
                 else
                 {
@@ -753,7 +785,7 @@ public partial class MainWindow : Window
             var last = session.Finish();
             Dispatcher.Invoke(() =>
             {
-                AppendFinal(last, formatAsSentences: true);
+                AppendFinal(last, formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset);
                 PartialText.Text = string.Empty;
             });
         }, cancellationToken);
@@ -772,8 +804,8 @@ public partial class MainWindow : Window
             }, cancellationToken);
 
             var wavBytes = await File.ReadAllBytesAsync(temp, cancellationToken);
-            var text = await TranscribeCloudAsync(wavBytes, cancellationToken);
-            AppendFinal(text);
+            var result = await TranscribeCloudAsync(wavBytes, cancellationToken);
+            AppendFinal(result, timeOffsetSeconds: _sessionTimeOffset);
         }
         finally
         {
@@ -797,8 +829,8 @@ public partial class MainWindow : Window
 
         try
         {
-            string? final = null;
             string? partial = null;
+            TranscriptionResult? final = null;
             bool accepted = false;
             var hasVosk = false;
 
@@ -815,7 +847,7 @@ public partial class MainWindow : Window
             {
                 if (accepted)
                 {
-                    Dispatcher.BeginInvoke(() => AppendFinal(final, formatAsSentences: true));
+                    Dispatcher.BeginInvoke(() => AppendFinal(final, formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset));
                 }
                 else
                 {
@@ -838,12 +870,15 @@ public partial class MainWindow : Window
 
             const int chunkBytes = Pcm16kMonoConverter.SampleRate * 2 * 4;
             byte[]? chunk = null;
+            long offsetBytes = 0;
             lock (apiBuffer)
             {
                 apiBuffer.Write(pcm, 0, pcm.Length);
                 if (apiBuffer.Length >= chunkBytes)
                 {
                     chunk = apiBuffer.ToArray();
+                    offsetBytes = _liveApiPcmBytes;
+                    _liveApiPcmBytes += chunk.Length;
                     apiBuffer.SetLength(0);
                     apiBuffer.Position = 0;
                 }
@@ -852,7 +887,8 @@ public partial class MainWindow : Window
             if (chunk is not null)
             {
                 var token = _workCts?.Token ?? CancellationToken.None;
-                _ = TranscribeApiChunkAsync(chunk, token);
+                var offset = _sessionTimeOffset + PcmDurationSeconds(offsetBytes);
+                _ = TranscribeApiChunkAsync(chunk, offset, token);
             }
         }
         catch (Exception ex)
@@ -862,13 +898,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task TranscribeApiChunkAsync(byte[] pcm, CancellationToken cancellationToken)
+    private async Task TranscribeApiChunkAsync(byte[] pcm, double timeOffsetSeconds, CancellationToken cancellationToken)
     {
         await _apiGate.WaitAsync(cancellationToken);
         try
         {
-            var text = await TranscribeCloudPcmAsync(pcm, cancellationToken);
-            await Dispatcher.InvokeAsync(() => AppendFinal(text));
+            var result = await TranscribeCloudPcmAsync(pcm, cancellationToken);
+            await Dispatcher.InvokeAsync(() => AppendFinal(result, timeOffsetSeconds: timeOffsetSeconds));
         }
         catch (OperationCanceledException)
         {
@@ -965,15 +1001,16 @@ public partial class MainWindow : Window
         TranscribeFileButton.IsEnabled = idle && !string.IsNullOrWhiteSpace(_selectedAudioFile);
     }
 
-    private void AppendFinal(string? text, bool formatAsSentences = false)
+    private void AppendFinal(TranscriptionResult? result, bool formatAsSentences = false, double timeOffsetSeconds = 0)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        if (result is null || result.IsEmpty)
         {
             return;
         }
 
-        var original = text.Trim();
+        var original = result.Text.Trim();
         var incoming = original;
+        var words = result.Words.ToList();
         if (_lastFinalRaw is not null)
         {
             if (incoming.Equals(_lastFinalRaw, StringComparison.OrdinalIgnoreCase))
@@ -989,6 +1026,7 @@ public partial class MainWindow : Window
                 if (at == incoming.Length || char.IsWhiteSpace(incoming[at]))
                 {
                     incoming = incoming[at..].TrimStart();
+                    words = TranscriptText.StripPrefixWords(words, _lastFinalRaw);
                     if (incoming.Length == 0)
                     {
                         return;
@@ -1009,6 +1047,27 @@ public partial class MainWindow : Window
             PartialText.Text = string.Empty;
             return;
         }
+
+        if (words.Count > 0)
+        {
+            words = TranscriptText.Offset(words, timeOffsetSeconds).ToList();
+        }
+        else
+        {
+            var start = _timedWords.Count > 0 ? _timedWords[^1].EndSeconds : timeOffsetSeconds;
+            words = SrtFormatter.EstimateWords(
+                prepared.Incoming,
+                start,
+                Math.Max(1.2, CountWords(prepared.Incoming) * 0.35)).ToList();
+        }
+
+        var preparedWords = TranscriptText.PrepareWords(_timedWords, words, prepared.Existing, formatAsSentences);
+        if (preparedWords.Count > 0)
+        {
+            _timedWords.AddRange(preparedWords);
+        }
+
+        RefreshSrtBox();
 
         if (TranscriptBox.Text.Length > 0 && !char.IsWhiteSpace(TranscriptBox.Text[^1]))
         {
@@ -1049,7 +1108,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private Task<string> TranscribeCloudAsync(byte[] wavBytes, CancellationToken cancellationToken)
+    private Task<TranscriptionResult> TranscribeCloudAsync(byte[] wavBytes, CancellationToken cancellationToken)
     {
         if (UseElevenLabs)
         {
@@ -1068,7 +1127,7 @@ public partial class MainWindow : Window
             cancellationToken);
     }
 
-    private Task<string> TranscribeCloudPcmAsync(byte[] pcm16kMono, CancellationToken cancellationToken)
+    private Task<TranscriptionResult> TranscribeCloudPcmAsync(byte[] pcm16kMono, CancellationToken cancellationToken)
     {
         var wav = Pcm16kMonoConverter.ToWavBytes(pcm16kMono);
         return TranscribeCloudAsync(wav, cancellationToken);
@@ -1088,6 +1147,47 @@ public partial class MainWindow : Window
     {
         SetStatus(title, ErrorBrush);
         MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private bool SrtTabSelected => TranscriptViewTabs.SelectedIndex == 1;
+
+    private void ApplyTranscriptLanguage(string? language)
+    {
+        TranscriptSpelling.ApplyLanguage(TranscriptBox, language);
+        TranscriptSpelling.ApplyLanguage(SrtBox, language);
+    }
+
+    private void SyncSpellingCorrection(TextBox source, string original, string replacement, int occurrence)
+    {
+        var target = ReferenceEquals(source, TranscriptBox) ? SrtBox : TranscriptBox;
+        var updated = SpellingSync.ReplaceOccurrence(
+            target.Text,
+            original,
+            replacement,
+            occurrence,
+            skipSrtMetadata: ReferenceEquals(target, SrtBox));
+        if (updated is not null && !string.Equals(updated, target.Text, StringComparison.Ordinal))
+        {
+            target.Text = updated;
+        }
+
+        SpellingSync.ReplaceTimedWord(_timedWords, original, replacement, occurrence);
+    }
+
+    private double NextSessionTimeOffset() =>
+        _timedWords.Count == 0 ? 0 : _timedWords[^1].EndSeconds + 0.5;
+
+    private static double PcmDurationSeconds(long byteCount) =>
+        byteCount / (double)(Pcm16kMonoConverter.SampleRate * 2);
+
+    private static int CountWords(string text) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+
+    private void RefreshSrtBox()
+    {
+        SrtBox.Text = SrtFormatter.ToSrt(_timedWords);
+        SrtBox.CaretIndex = SrtBox.Text.Length;
+        SrtBox.ScrollToEnd();
     }
 
     private static SolidColorBrush BrushFrom(string hex)

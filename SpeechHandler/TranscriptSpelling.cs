@@ -14,9 +14,13 @@ internal static class TranscriptSpelling
     private static readonly Guid SpellCheckerFactoryClsid = new("7AB36653-1796-484B-BDFA-E74F1DB7C1DC");
     private static readonly List<(string Path, string Tag)> Registrations = [];
 
+    private static readonly List<AttachedBox> Attached = [];
+
     private static string _currentLanguage = "English (US)";
 
-    public static void Attach(TextBox box)
+    public static Action<TextBox, string, string, int>? WordCorrected { get; set; }
+
+    public static void Attach(TextBox box, bool skipSrtMetadata = false)
     {
         MigrateLegacyDictionary();
         SpellCheck.SetIsEnabled(box, true);
@@ -27,6 +31,10 @@ internal static class TranscriptSpelling
 
         box.ContextMenuOpening -= OnContextMenuOpening;
         box.ContextMenuOpening += OnContextMenuOpening;
+        if (!Attached.Any(item => ReferenceEquals(item.Box, box)))
+        {
+            Attached.Add(new AttachedBox(box, skipSrtMetadata));
+        }
     }
 
     public static void ApplyLanguage(TextBox box, string? transcriptionLanguage)
@@ -58,6 +66,14 @@ internal static class TranscriptSpelling
 
     public static void Detach()
     {
+        WordCorrected = null;
+        foreach (var attached in Attached)
+        {
+            attached.Box.ContextMenuOpening -= OnContextMenuOpening;
+        }
+
+        Attached.Clear();
+
         (string Path, string Tag)[] registrations;
         lock (Sync)
         {
@@ -96,36 +112,41 @@ internal static class TranscriptSpelling
         var error = index >= 0 ? box.GetSpellingError(index) : null;
         if (error is not null)
         {
-            var addedSuggestion = false;
-            foreach (var suggestion in error.Suggestions)
-            {
-                var item = new MenuItem { Header = suggestion };
-                var replacement = suggestion;
-                item.Click += (_, _) => error.Correct(replacement);
-                menu.Items.Add(item);
-                addedSuggestion = true;
-            }
-
-            if (!addedSuggestion)
-            {
-                menu.Items.Add(new MenuItem { Header = "(no suggestions)", IsEnabled = false });
-            }
-
-            menu.Items.Add(new Separator());
-
-            var ignore = new MenuItem { Header = "Ignore All" };
-            ignore.Click += (_, _) => error.IgnoreAll();
-            menu.Items.Add(ignore);
-
             var start = box.GetSpellingErrorStart(index);
             var length = box.GetSpellingErrorLength(index);
             var word = start >= 0 && length > 0 && start + length <= box.Text.Length
                 ? box.Text.Substring(start, length)
                 : string.Empty;
-            var add = new MenuItem { Header = "Add to Dictionary", IsEnabled = word.Length > 0 };
-            add.Click += (_, _) => AddWord(box, word);
-            menu.Items.Add(add);
-            menu.Items.Add(new Separator());
+            if (word.Any(char.IsLetter))
+            {
+                var addedSuggestion = false;
+                var skipSrtMetadata = Attached.Any(item =>
+                    ReferenceEquals(item.Box, box) && item.SkipSrtMetadata);
+                foreach (var suggestion in error.Suggestions)
+                {
+                    var item = new MenuItem { Header = suggestion };
+                    var replacement = suggestion;
+                    item.Click += (_, _) => CorrectWord(box, error, word, replacement, start, skipSrtMetadata);
+                    menu.Items.Add(item);
+                    addedSuggestion = true;
+                }
+
+                if (!addedSuggestion)
+                {
+                    menu.Items.Add(new MenuItem { Header = "(no suggestions)", IsEnabled = false });
+                }
+
+                menu.Items.Add(new Separator());
+
+                var ignore = new MenuItem { Header = "Ignore All" };
+                ignore.Click += (_, _) => error.IgnoreAll();
+                menu.Items.Add(ignore);
+
+                var add = new MenuItem { Header = "Add to Dictionary", IsEnabled = word.Length > 0 };
+                add.Click += (_, _) => AddWord(box, word);
+                menu.Items.Add(add);
+                menu.Items.Add(new Separator());
+            }
         }
 
         menu.Items.Add(CommandItem("Cu_t", ApplicationCommands.Cut, box));
@@ -182,7 +203,23 @@ internal static class TranscriptSpelling
         var tag = box.Language?.IetfLanguageTag ?? ToLanguageTag(language);
         TryAddToWindowsDictionary(tag, word);
         TryRegisterDictionary(path, tag);
-        Refresh(box);
+        foreach (var attached in Attached)
+        {
+            Refresh(attached.Box);
+        }
+    }
+
+    private static void CorrectWord(
+        TextBox box,
+        SpellingError error,
+        string original,
+        string replacement,
+        int start,
+        bool skipSrtMetadata)
+    {
+        var occurrence = SpellingSync.CountOccurrencesBefore(box.Text, original, start, skipSrtMetadata);
+        error.Correct(replacement);
+        WordCorrected?.Invoke(box, original, replacement, occurrence);
     }
 
     private static void Refresh(TextBox box)
@@ -647,4 +684,6 @@ internal static class TranscriptSpelling
         REPLACE = 2,
         DELETE = 3
     }
+
+    private readonly record struct AttachedBox(TextBox Box, bool SkipSrtMetadata);
 }
