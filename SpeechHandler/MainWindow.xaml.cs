@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -478,11 +479,13 @@ public partial class MainWindow : Window
         _sessionTimeOffset = NextSessionTimeOffset();
         try
         {
+            var stopwatch = Stopwatch.StartNew();
             if (UseLocalEngine)
             {
                 ProcessingMessage.Text = "Loading speech model…";
                 await PrepareLocalModelAsync(cts.Token);
                 ProcessingMessage.Text = "Processing audio file…";
+                stopwatch.Restart();
                 await TranscribeFileLocalAsync(path, cts.Token);
             }
             else
@@ -491,7 +494,10 @@ public partial class MainWindow : Window
                 await TranscribeFileApiAsync(path, cts.Token);
             }
 
-            SetStatus($"Transcribed {Path.GetFileName(path)}.", IdleBrush);
+            stopwatch.Stop();
+            SetStatus(
+                $"Transcribed {Path.GetFileName(path)} in {stopwatch.Elapsed.TotalSeconds:F1} seconds.",
+                IdleBrush);
         }
         catch (OperationCanceledException)
         {

@@ -29,6 +29,8 @@ internal static class TranscriptSpelling
             box.ContextMenu = CreateMenu(box);
         }
 
+        box.PreviewMouseRightButtonDown -= OnPreviewMouseRightButtonDown;
+        box.PreviewMouseRightButtonDown += OnPreviewMouseRightButtonDown;
         box.ContextMenuOpening -= OnContextMenuOpening;
         box.ContextMenuOpening += OnContextMenuOpening;
         if (!Attached.Any(item => ReferenceEquals(item.Box, box)))
@@ -69,6 +71,7 @@ internal static class TranscriptSpelling
         WordCorrected = null;
         foreach (var attached in Attached)
         {
+            attached.Box.PreviewMouseRightButtonDown -= OnPreviewMouseRightButtonDown;
             attached.Box.ContextMenuOpening -= OnContextMenuOpening;
         }
 
@@ -98,6 +101,42 @@ internal static class TranscriptSpelling
         };
     }
 
+    // A custom ContextMenu stops WPF from moving the caret on right-click, so the
+    // menu would otherwise query the previous caret location. Place the caret (and
+    // select the misspelling) before ContextMenuOpening runs.
+    private static void OnPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBox box)
+        {
+            return;
+        }
+
+        var index = CharacterIndexFromPoint(box, e.GetPosition(box));
+        if (index < 0)
+        {
+            return;
+        }
+
+        if (TryResolveSpellingError(box, index, out _, out var errorIndex))
+        {
+            var start = box.GetSpellingErrorStart(errorIndex);
+            var length = box.GetSpellingErrorLength(errorIndex);
+            if (start >= 0 && length > 0)
+            {
+                box.Select(start, length);
+            }
+
+            return;
+        }
+
+        if (IsIndexInSelection(box, index))
+        {
+            return;
+        }
+
+        box.CaretIndex = index;
+    }
+
     private static void OnContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
         if (sender is not TextBox box || box.ContextMenu is null)
@@ -109,11 +148,10 @@ internal static class TranscriptSpelling
         menu.Items.Clear();
 
         var index = ResolveCharacterIndex(box, e);
-        var error = index >= 0 ? box.GetSpellingError(index) : null;
-        if (error is not null)
+        if (TryResolveSpellingError(box, index, out var error, out var errorIndex) && error is not null)
         {
-            var start = box.GetSpellingErrorStart(index);
-            var length = box.GetSpellingErrorLength(index);
+            var start = box.GetSpellingErrorStart(errorIndex);
+            var length = box.GetSpellingErrorLength(errorIndex);
             var word = start >= 0 && length > 0 && start + length <= box.Text.Length
                 ? box.Text.Substring(start, length)
                 : string.Empty;
@@ -166,16 +204,101 @@ internal static class TranscriptSpelling
 
     private static int ResolveCharacterIndex(TextBox box, ContextMenuEventArgs e)
     {
-        if (e.CursorLeft >= 0 && e.CursorTop >= 0)
+        if (Mouse.RightButton == MouseButtonState.Pressed || (e.CursorLeft >= 0 && e.CursorTop >= 0))
         {
-            var fromPoint = box.GetCharacterIndexFromPoint(new Point(e.CursorLeft, e.CursorTop), true);
-            if (fromPoint >= 0)
+            // Mouse.GetPosition(box) is in TextBox space. CursorLeft/CursorTop can be
+            // relative to an inner element (for example a spelling adorner).
+            var fromMouse = CharacterIndexFromPoint(box, Mouse.GetPosition(box));
+            if (fromMouse >= 0)
             {
-                return fromPoint;
+                return fromMouse;
+            }
+
+            if (e.CursorLeft >= 0 && e.CursorTop >= 0)
+            {
+                var fromCursor = CharacterIndexFromPoint(box, new Point(e.CursorLeft, e.CursorTop));
+                if (fromCursor >= 0)
+                {
+                    return fromCursor;
+                }
             }
         }
 
+        if (box.SelectionLength > 0)
+        {
+            return box.SelectionStart;
+        }
+
         return box.CaretIndex;
+    }
+
+    private static int CharacterIndexFromPoint(TextBox box, Point point) =>
+        box.GetCharacterIndexFromPoint(point, snapToText: true);
+
+    private static bool TryResolveSpellingError(
+        TextBox box,
+        int index,
+        out SpellingError? error,
+        out int errorIndex)
+    {
+        error = null;
+        errorIndex = -1;
+        if (box.Text.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var candidate in SpellingCandidates(box, index))
+        {
+            var found = box.GetSpellingError(candidate);
+            if (found is not null)
+            {
+                error = found;
+                errorIndex = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<int> SpellingCandidates(TextBox box, int index)
+    {
+        var max = box.Text.Length;
+        var seen = new HashSet<int>();
+        foreach (var candidate in EnumerateSpellingCandidates(box, index))
+        {
+            if (candidate >= 0 && candidate <= max && seen.Add(candidate))
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private static IEnumerable<int> EnumerateSpellingCandidates(TextBox box, int index)
+    {
+        // GetCharacterIndexFromPoint returns an insertion index, which often lands
+        // just after the last character of the misspelled word.
+        yield return index;
+        yield return index - 1;
+        yield return box.CaretIndex;
+        yield return box.CaretIndex - 1;
+        if (box.SelectionLength > 0)
+        {
+            yield return box.SelectionStart;
+            yield return box.SelectionStart + box.SelectionLength - 1;
+        }
+    }
+
+    private static bool IsIndexInSelection(TextBox box, int index)
+    {
+        if (box.SelectionLength == 0)
+        {
+            return false;
+        }
+
+        var start = box.SelectionStart;
+        return index >= start && index <= start + box.SelectionLength;
     }
 
     private static void AddWord(TextBox box, string word)
