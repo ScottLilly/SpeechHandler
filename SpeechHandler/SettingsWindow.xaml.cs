@@ -8,10 +8,11 @@ namespace SpeechHandler;
 internal partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
+    private bool _suppressLanguageSelection;
     private bool _suppressModelSelection;
     private bool _downloading;
     private CancellationTokenSource? _downloadCts;
-    private string _modelFolderPath = string.Empty;
+    private string _modelsDirectory = string.Empty;
 
     public string OpenAiKey { get; private set; }
     public string ElevenLabsKey { get; private set; }
@@ -22,7 +23,6 @@ internal partial class SettingsWindow : Window
         OpenAiKey = openAiKey;
         ElevenLabsKey = elevenLabsKey;
         InitializeComponent();
-        RefreshVoskModelList();
         LoadFromSettings();
         UpdateEnginePanels();
     }
@@ -31,32 +31,20 @@ internal partial class SettingsWindow : Window
 
     private void LoadFromSettings()
     {
-        _suppressModelSelection = true;
-        try
+        VoskModelManager.EnsurePaths(_settings);
+        EngineCombo.SelectedIndex = _settings.Engine switch
         {
-            EngineCombo.SelectedIndex = _settings.Engine switch
-            {
-                "Api" => 1,
-                "ElevenLabs" => 2,
-                _ => 0
-            };
-            SetModelPath(!string.IsNullOrWhiteSpace(_settings.ModelPath)
-                ? _settings.ModelPath
-                : (VoskModelManager.LooksLikeModel(VoskModelManager.DefaultSmallEnglishPath)
-                    ? VoskModelManager.DefaultSmallEnglishPath
-                    : string.Empty));
-            VoskModelCombo.SelectedItem = VoskModelManager.FindOptionForPath(ModelFolderPath)
-                                          ?? VoskModelManager.EnglishModels[0];
-            TranslateCheck.IsChecked = _settings.TranslateToEnglish;
-            SelectComboItem(WhisperModelCombo, _settings.WhisperModel);
-            SelectComboItem(ElevenLabsModelCombo, _settings.ElevenLabsModel);
-            ApiKeyBox.Password = OpenAiKey;
-            ElevenLabsApiKeyBox.Password = ElevenLabsKey;
-        }
-        finally
-        {
-            _suppressModelSelection = false;
-        }
+            "Api" => 1,
+            "ElevenLabs" => 2,
+            _ => 0
+        };
+        SetModelsDirectory(_settings.ModelsDirectory);
+        RefreshVoskModelList();
+        TranslateCheck.IsChecked = _settings.TranslateToEnglish;
+        SelectComboItem(WhisperModelCombo, _settings.WhisperModel);
+        SelectComboItem(ElevenLabsModelCombo, _settings.ElevenLabsModel);
+        ApiKeyBox.Password = OpenAiKey;
+        ElevenLabsApiKeyBox.Password = ElevenLabsKey;
     }
 
     private void SaveToSettings()
@@ -67,7 +55,7 @@ internal partial class SettingsWindow : Window
             2 => "ElevenLabs",
             _ => "Local"
         };
-        _settings.ModelPath = ModelFolderPath;
+        _settings.ModelsDirectory = ModelsDirectoryPath;
         _settings.TranslateToEnglish = TranslateCheck.IsChecked == true;
         _settings.WhisperModel = SelectedComboText(WhisperModelCombo) ?? "whisper-1";
         _settings.ElevenLabsModel = SelectedComboText(ElevenLabsModelCombo) ?? "scribe_v2";
@@ -76,15 +64,15 @@ internal partial class SettingsWindow : Window
         _settings.Save();
     }
 
-    private string ModelFolderPath => _modelFolderPath;
+    private string ModelsDirectoryPath => _modelsDirectory;
 
-    private void SetModelPath(string? path)
+    private void SetModelsDirectory(string? path)
     {
-        _modelFolderPath = string.IsNullOrWhiteSpace(path)
+        _modelsDirectory = string.IsNullOrWhiteSpace(path)
             ? string.Empty
             : Path.GetFullPath(path.Trim());
 
-        if (string.IsNullOrWhiteSpace(_modelFolderPath))
+        if (string.IsNullOrWhiteSpace(_modelsDirectory))
         {
             ModelPathText.Text = "No folder selected";
             ModelPathText.ToolTip = null;
@@ -92,8 +80,8 @@ internal partial class SettingsWindow : Window
         }
 
         ModelPathText.Text = Path.GetFileName(
-            _modelFolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        ModelPathText.ToolTip = _modelFolderPath;
+            _modelsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        ModelPathText.ToolTip = _modelsDirectory;
     }
 
     private void EngineCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -115,20 +103,42 @@ internal partial class SettingsWindow : Window
 
     private void RefreshVoskModelList()
     {
-        var selectedId = (VoskModelCombo.SelectedItem as VoskModelOption)?.Id
-                         ?? VoskModelManager.FindOptionForPath(ModelFolderPath)?.Id;
+        var current = VoskModelManager.FindOptionForPath(_settings.ModelPath);
+        var selectedLanguage = (VoskLanguageCombo.SelectedItem as string)
+                               ?? current?.Language
+                               ?? VoskModelManager.DefaultLanguage;
+        var selectedId = (VoskModelCombo.SelectedItem as VoskModelOption)?.Id ?? current?.Id;
+
+        _suppressLanguageSelection = true;
         _suppressModelSelection = true;
         try
         {
-            VoskModelCombo.ItemsSource = null;
-            VoskModelCombo.ItemsSource = VoskModelManager.EnglishModels;
-            VoskModelCombo.SelectedItem = VoskModelManager.EnglishModels.FirstOrDefault(model => model.Id == selectedId)
-                                          ?? VoskModelManager.EnglishModels[0];
+            VoskLanguageCombo.ItemsSource = VoskModelManager.Languages;
+            VoskLanguageCombo.SelectedItem = VoskModelManager.Languages.Contains(selectedLanguage)
+                ? selectedLanguage
+                : VoskModelManager.DefaultLanguage;
+
+            var language = VoskLanguageCombo.SelectedItem as string ?? VoskModelManager.DefaultLanguage;
+            var models = VoskModelManager.ModelsForLanguage(language, ModelsDirectoryPath);
+            VoskModelCombo.ItemsSource = models;
+            VoskModelCombo.SelectedItem = models.FirstOrDefault(model => model.Id == selectedId)
+                                          ?? models.FirstOrDefault();
         }
         finally
         {
+            _suppressLanguageSelection = false;
             _suppressModelSelection = false;
         }
+    }
+
+    private void VoskLanguageCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _suppressLanguageSelection)
+        {
+            return;
+        }
+
+        RefreshVoskModelList();
     }
 
     private void VoskModelCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -143,10 +153,10 @@ internal partial class SettingsWindow : Window
             return;
         }
 
-        var installed = VoskModelManager.FindInstalledPath(model);
+        var installed = VoskModelManager.FindInstalledPath(model, ModelsDirectoryPath);
         if (installed is not null)
         {
-            SetModelPath(installed);
+            _settings.ModelPath = installed;
             SaveToSettings();
         }
     }
@@ -160,7 +170,7 @@ internal partial class SettingsWindow : Window
 
         var dialog = new OpenFolderDialog
         {
-            Title = "Select a Vosk model folder",
+            Title = "Select a folder for Vosk models",
             Multiselect = false
         };
 
@@ -178,7 +188,7 @@ internal partial class SettingsWindow : Window
         }
 
         var selected = Path.GetFullPath(dialog.FolderName);
-        var current = ModelFolderPath;
+        var current = ModelsDirectoryPath;
         if (!string.IsNullOrWhiteSpace(current)
             && string.Equals(current, selected, StringComparison.OrdinalIgnoreCase))
         {
@@ -187,7 +197,7 @@ internal partial class SettingsWindow : Window
 
         if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current) || !HasModelFiles(current))
         {
-            ApplySelectedModelFolder(selected, moving: false);
+            ApplySelectedModelsFolder(selected, current, moving: false);
             return;
         }
 
@@ -220,21 +230,21 @@ internal partial class SettingsWindow : Window
                 return;
             }
 
-            ApplySelectedModelFolder(selected, moving: true);
+            ApplySelectedModelsFolder(selected, current, moving: true);
             return;
         }
 
-        ApplySelectedModelFolder(selected, moving: false);
+        ApplySelectedModelsFolder(selected, current, moving: false);
     }
 
     private string? ResolveBrowseStartFolder()
     {
-        if (!string.IsNullOrWhiteSpace(ModelFolderPath) && Directory.Exists(ModelFolderPath))
+        if (!string.IsNullOrWhiteSpace(ModelsDirectoryPath) && Directory.Exists(ModelsDirectoryPath))
         {
-            return ModelFolderPath;
+            return ModelsDirectoryPath;
         }
 
-        var parent = Path.GetDirectoryName(ModelFolderPath);
+        var parent = Path.GetDirectoryName(ModelsDirectoryPath);
         if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
         {
             return parent;
@@ -243,35 +253,35 @@ internal partial class SettingsWindow : Window
         return Directory.Exists(AppStorage.ModelsDirectory) ? AppStorage.ModelsDirectory : null;
     }
 
-    private void ApplySelectedModelFolder(string selected, bool moving)
+    private void ApplySelectedModelsFolder(string selected, string? previous, bool moving)
     {
-        var found = VoskModelManager.FindModelFolder(selected);
-        if (found is null)
+        Directory.CreateDirectory(selected);
+        if (moving && !string.IsNullOrWhiteSpace(previous))
         {
-            if (moving)
-            {
-                MessageBox.Show(
-                    this,
-                    "The files were moved, but that folder does not look like a Vosk model.",
-                    "Settings",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                SetModelPath(selected);
-                SaveToSettings();
-                return;
-            }
+            RemapModelPath(previous, selected);
+        }
 
-            MessageBox.Show(
-                this,
-                "That folder does not look like a Vosk model. Choose the extracted model directory (it contains am, conf, or graph).",
-                "Settings",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+        SetModelsDirectory(selected);
+        RefreshVoskModelList();
+        SaveToSettings();
+    }
+
+    private void RemapModelPath(string oldRoot, string newRoot)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.ModelPath))
+        {
             return;
         }
 
-        SetModelPath(found);
-        SaveToSettings();
+        var full = Path.GetFullPath(_settings.ModelPath);
+        var oldPrefix = oldRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        + Path.DirectorySeparatorChar;
+        if (full.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(full, oldRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            var relative = Path.GetRelativePath(oldRoot, full);
+            _settings.ModelPath = Path.GetFullPath(Path.Combine(newRoot, relative));
+        }
     }
 
     private static bool HasModelFiles(string path)
@@ -340,11 +350,18 @@ internal partial class SettingsWindow : Window
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(ModelsDirectoryPath))
+        {
+            MessageBox.Show(this, "Choose a models folder before downloading.", "Settings",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         if (model.ConfirmLargeDownload)
         {
             var confirm = MessageBox.Show(
                 this,
-                $"{model.DisplayName} is a large download and needs several gigabytes of disk space. Continue?",
+                $"{model.Language} · {model.DisplayName} is a large download and may need a lot of disk space. Continue?",
                 "Download Vosk model",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
@@ -366,8 +383,9 @@ internal partial class SettingsWindow : Window
                 DownloadMessage.Text = $"Downloading {model.FolderName}… {value:0}%";
             });
 
-            var path = await VoskModelManager.DownloadAsync(model, progress, _downloadCts.Token);
-            SetModelPath(path);
+            var path = await VoskModelManager.DownloadAsync(
+                model, ModelsDirectoryPath, progress, _downloadCts.Token);
+            _settings.ModelPath = path;
             RefreshVoskModelList();
             SaveToSettings();
             DownloadMessage.Text = $"{model.FolderName} is ready.";
@@ -425,6 +443,7 @@ internal partial class SettingsWindow : Window
         DownloadButton.IsEnabled = !downloading;
         BrowseButton.IsEnabled = !downloading;
         EngineCombo.IsEnabled = !downloading;
+        VoskLanguageCombo.IsEnabled = !downloading;
         VoskModelCombo.IsEnabled = !downloading;
         CloseButton.IsEnabled = !downloading;
         CancelDownloadButton.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;

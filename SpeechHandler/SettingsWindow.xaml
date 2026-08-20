@@ -13,7 +13,7 @@
     <DockPanel Margin="20">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button x:Name="CloseButton" Style="{StaticResource PrimaryButton}" Content="Close"
-                    MinWidth="100" IsDefault="True" Click="Close_Click"/>
+                    Width="120" IsDefault="True" Click="Close_Click"/>
         </StackPanel>
 
         <StackPanel>
@@ -27,10 +27,20 @@
 
             <StackPanel x:Name="LocalSettingsPanel" Margin="0,16,0,0">
                 <TextBlock Style="{StaticResource SectionTitle}" Text="Vosk model"/>
+                <Label Content="Language" Padding="0,0,0,6" HorizontalAlignment="Left"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="120"/>
+                    </Grid.ColumnDefinitions>
+                    <ComboBox x:Name="VoskLanguageCombo" Margin="0,0,8,0"
+                              SelectionChanged="VoskLanguageCombo_SelectionChanged"/>
+                </Grid>
+                <Label Content="Model" Padding="0,12,0,6" HorizontalAlignment="Left"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="120"/>
                     </Grid.ColumnDefinitions>
                     <ComboBox x:Name="VoskModelCombo" Margin="0,0,8,0"
                               SelectionChanged="VoskModelCombo_SelectionChanged">
@@ -61,23 +71,25 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <Button x:Name="DownloadButton" Grid.Column="1" Style="{StaticResource SecondaryButton}"
-                            Content="Download" MinWidth="100" Click="DownloadModel_Click"/>
+                            Content="Download" Width="120" Click="DownloadModel_Click"/>
                 </Grid>
-                <Label Content="Model folder" Padding="0,12,0,6" HorizontalAlignment="Left"/>
+                <Label Content="Models folder" Padding="0,12,0,6" HorizontalAlignment="Left"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="120"/>
                     </Grid.ColumnDefinitions>
                     <Border Background="{StaticResource FieldBg}" BorderBrush="{StaticResource CardBorder}"
-                            BorderThickness="1" CornerRadius="4" Padding="8,6">
+                            BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,8,0">
                         <TextBlock x:Name="ModelPathText" TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center"
                                    Text="No folder selected"/>
                     </Border>
                     <Button x:Name="BrowseButton" Grid.Column="1" Style="{StaticResource SecondaryButton}"
-                            Content="Browse…" Margin="8,0,0,0" MinWidth="90" Click="BrowseModel_Click"/>
+                            Content="Browse…" Width="120" Click="BrowseModel_Click"/>
                 </Grid>
+                <TextBlock Style="{StaticResource MutedText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                           Text="All downloaded Vosk models are stored in this folder."/>
                 <StackPanel x:Name="DownloadProgressPanel" Margin="0,12,0,0" Visibility="Collapsed">
                     <TextBlock x:Name="DownloadMessage" Text="Downloading…" Margin="0,0,0,8"/>
                     <ProgressBar x:Name="DownloadBar" IsIndeterminate="True"/>

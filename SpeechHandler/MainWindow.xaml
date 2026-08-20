@@ -60,44 +60,6 @@
             <TabControl Grid.Row="1" Margin="0,0,0,12" TabStripPlacement="Left">
                 <TabItem>
                     <TabItem.Header>
-                        <TextBlock Text="Live transcription" TextWrapping="Wrap" TextAlignment="Center"
-                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
-                    </TabItem.Header>
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
-                                   FontSize="13" Foreground="{StaticResource TextPrimary}"
-                                   Text="Capture from a microphone or from system audio."/>
-                        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="StartLiveButton" Style="{StaticResource PrimaryButton}"
-                                    Content="Start" HorizontalAlignment="Stretch"
-                                    Click="StartLive_Click"/>
-                            <Button x:Name="StopLiveButton" Grid.Column="2" Style="{StaticResource DangerButton}"
-                                    Content="Stop" HorizontalAlignment="Stretch"
-                                    IsEnabled="False" Click="StopLive_Click"/>
-                        </Grid>
-                        <StackPanel VerticalAlignment="Center">
-                            <Label Content="Input source" Padding="0,0,0,6" HorizontalAlignment="Left"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <ComboBox x:Name="SourcesCombo" DisplayMemberPath="DisplayName"/>
-                                <Button x:Name="RefreshSourcesButton" Grid.Column="1"
-                                        Style="{StaticResource SecondaryButton}" Content="Refresh"
-                                        MinWidth="80" Padding="10,4" Margin="8,0,0,0"
-                                        Click="RefreshSources_Click"/>
-                            </Grid>
-                        </StackPanel>
-                    </DockPanel>
-                </TabItem>
-                <TabItem>
-                    <TabItem.Header>
                         <TextBlock Text="Audio file" TextWrapping="Wrap" TextAlignment="Center"
                                    Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
                     </TabItem.Header>
@@ -145,6 +107,44 @@
                             <TextBlock x:Name="SelectedFileFormat" Grid.Row="3" Grid.Column="1"
                                        Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
                         </Grid>
+                    </DockPanel>
+                </TabItem>
+                <TabItem>
+                    <TabItem.Header>
+                        <TextBlock Text="Live transcription" TextWrapping="Wrap" TextAlignment="Center"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
+                    </TabItem.Header>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
+                                   FontSize="13" Foreground="{StaticResource TextPrimary}"
+                                   Text="Capture from a microphone or from system audio."/>
+                        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="StartLiveButton" Style="{StaticResource PrimaryButton}"
+                                    Content="Start" HorizontalAlignment="Stretch"
+                                    Click="StartLive_Click"/>
+                            <Button x:Name="StopLiveButton" Grid.Column="2" Style="{StaticResource DangerButton}"
+                                    Content="Stop" HorizontalAlignment="Stretch"
+                                    IsEnabled="False" Click="StopLive_Click"/>
+                        </Grid>
+                        <StackPanel VerticalAlignment="Center">
+                            <Label Content="Input source" Padding="0,0,0,6" HorizontalAlignment="Left"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="SourcesCombo" DisplayMemberPath="DisplayName"/>
+                                <Button x:Name="RefreshSourcesButton" Grid.Column="1"
+                                        Style="{StaticResource SecondaryButton}" Content="Refresh"
+                                        MinWidth="80" Padding="10,4" Margin="8,0,0,0"
+                                        Click="RefreshSources_Click"/>
+                            </Grid>
+                        </StackPanel>
                     </DockPanel>
                 </TabItem>
             </TabControl>

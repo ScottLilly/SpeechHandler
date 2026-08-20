@@ -74,10 +74,9 @@ public partial class MainWindow : Window
     {
         TtsVoiceCombo.SelectedItem = TtsVoiceCatalog.Voices.FirstOrDefault(v => v.Id == _settings.TtsVoiceId)
                                      ?? TtsVoiceCatalog.Voices[0];
-        if (string.IsNullOrWhiteSpace(_settings.ModelPath)
-            && VoskModelManager.LooksLikeModel(VoskModelManager.DefaultSmallEnglishPath))
+        if (VoskModelManager.EnsurePaths(_settings))
         {
-            _settings.ModelPath = VoskModelManager.DefaultSmallEnglishPath;
+            _settings.Save();
         }
     }
 
@@ -118,7 +117,8 @@ public partial class MainWindow : Window
         try
         {
             var items = new List<TranscriptionOption>();
-            foreach (var model in VoskModelManager.ListInstalled(_settings.ModelPath))
+            foreach (var model in VoskModelManager.ListInstalled(
+                         VoskModelManager.ResolveModelsDirectory(_settings), _settings.ModelPath))
             {
                 items.Add(new TranscriptionOption("Local", $"Vosk · {model.DisplayName}", model.Path));
             }

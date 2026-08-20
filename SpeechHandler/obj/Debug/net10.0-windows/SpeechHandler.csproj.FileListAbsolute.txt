@@ -39,3 +39,12 @@ D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\Se
 D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\SettingsWindow.g.cs
 D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\AboutWindow.baml
 D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\AboutWindow.g.cs
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\libgcc_s_seh-1.dll
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\libstdc++-6.dll
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\libvosk.dll
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\libwinpthread-1.dll
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.exe
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.deps.json
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.runtimeconfig.json
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.dll
+C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.pdb
