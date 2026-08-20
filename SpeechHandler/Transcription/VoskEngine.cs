@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Vosk;
 
@@ -61,7 +62,7 @@ internal sealed class VoskSession : IDisposable
     {
         _recognizer = new VoskRecognizer(model, Audio.Pcm16kMonoConverter.SampleRate);
         _recognizer.SetMaxAlternatives(0);
-        _recognizer.SetWords(false);
+        _recognizer.SetWords(true);
     }
 
     public bool Accept(byte[] data, int length, out string? finalText, out string? partialText)
@@ -70,7 +71,7 @@ internal sealed class VoskSession : IDisposable
 
         if (_recognizer.AcceptWaveform(data, length))
         {
-            finalText = ReadJsonString(_recognizer.Result(), "text");
+            finalText = ReadResultText(_recognizer.Result());
             partialText = null;
             return true;
         }
@@ -83,7 +84,7 @@ internal sealed class VoskSession : IDisposable
     public string? Finish()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return ReadJsonString(_recognizer.FinalResult(), "text");
+        return ReadResultText(_recognizer.FinalResult());
     }
 
     public void Dispose()
@@ -95,6 +96,72 @@ internal sealed class VoskSession : IDisposable
 
         _disposed = true;
         _recognizer.Dispose();
+    }
+
+    private static string? ReadResultText(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.TryGetProperty("result", out var words) && words.ValueKind == JsonValueKind.Array)
+        {
+            var fromWords = BuildTextFromWords(words);
+            if (!string.IsNullOrWhiteSpace(fromWords))
+            {
+                return fromWords;
+            }
+        }
+
+        if (!root.TryGetProperty("text", out var value))
+        {
+            return null;
+        }
+
+        var text = value.GetString();
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    private static string BuildTextFromWords(JsonElement words)
+    {
+        var builder = new StringBuilder();
+        var lastEnd = -1.0;
+        foreach (var word in words.EnumerateArray())
+        {
+            if (!word.TryGetProperty("word", out var tokenElement))
+            {
+                continue;
+            }
+
+            var token = tokenElement.GetString();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            var start = word.TryGetProperty("start", out var startElement)
+                ? startElement.GetDouble()
+                : -1;
+
+            if (builder.Length > 0)
+            {
+                // A long pause inside an utterance is a reliable sentence break.
+                // Commas are not: pauses and comma placement often disagree.
+                builder.Append(lastEnd >= 0 && start >= 0 && start - lastEnd >= 0.7
+                    ? ". "
+                    : " ");
+            }
+
+            builder.Append(token);
+            lastEnd = word.TryGetProperty("end", out var endElement)
+                ? endElement.GetDouble()
+                : start;
+        }
+
+        return builder.ToString();
     }
 
     private static string? ReadJsonString(string json, string propertyName)

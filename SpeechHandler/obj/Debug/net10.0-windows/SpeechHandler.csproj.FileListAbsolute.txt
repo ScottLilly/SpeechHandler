@@ -34,3 +34,8 @@ D:\Development\Percogna\SpeechHandler\SpeechHandler\bin\Debug\net10.0-windows\NA
 D:\Development\Percogna\SpeechHandler\SpeechHandler\bin\Debug\net10.0-windows\System.Numerics.Tensors.dll
 D:\Development\Percogna\SpeechHandler\SpeechHandler\bin\Debug\net10.0-windows\Vosk.dll
 D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\SpeechHa.7D4A54D8.Up2Date
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\SpeechHandler.sourcelink.json
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\SettingsWindow.baml
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\SettingsWindow.g.cs
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\AboutWindow.baml
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\AboutWindow.g.cs

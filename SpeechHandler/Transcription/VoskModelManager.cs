@@ -23,6 +23,7 @@ internal sealed class AppSettings
     public string Engine { get; set; } = "Local";
     public string? ModelPath { get; set; }
     public string WhisperModel { get; set; } = "whisper-1";
+    public string ElevenLabsModel { get; set; } = "scribe_v2";
     public bool TranslateToEnglish { get; set; }
     public string TtsVoiceId { get; set; } = "lessac";
 
@@ -60,6 +61,14 @@ internal sealed record VoskModelOption(
     string Url,
     bool ConfirmLargeDownload)
 {
+    public bool IsDownloaded => VoskModelManager.FindInstalledPath(this) is not null;
+
+    public override string ToString() =>
+        IsDownloaded ? $"{DisplayName}  ·  downloaded" : DisplayName;
+}
+
+internal sealed record InstalledVoskModel(string Id, string DisplayName, string Path)
+{
     public override string ToString() => DisplayName;
 }
 
@@ -95,6 +104,31 @@ internal static class VoskModelManager
 
     public static string DefaultSmallEnglishPath { get; } =
         Path.Combine(AppStorage.ModelsDirectory, EnglishModels[0].FolderName);
+
+    public static string? FindInstalledPath(VoskModelOption model) =>
+        FindModelFolder(Path.Combine(AppStorage.ModelsDirectory, model.FolderName));
+
+    public static IReadOnlyList<InstalledVoskModel> ListInstalled(string? currentPath)
+    {
+        var items = new List<InstalledVoskModel>();
+        foreach (var model in EnglishModels)
+        {
+            var path = FindInstalledPath(model);
+            if (path is not null)
+            {
+                items.Add(new InstalledVoskModel(model.Id, model.DisplayName, path));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(currentPath)
+            && LooksLikeModel(currentPath)
+            && items.TrueForAll(item => !string.Equals(item.Path, currentPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            items.Add(new InstalledVoskModel("custom", $"Custom — {Path.GetFileName(currentPath)}", currentPath));
+        }
+
+        return items;
+    }
 
     public static VoskModelOption? FindOptionForPath(string? path)
     {

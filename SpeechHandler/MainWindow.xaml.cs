@@ -20,6 +20,7 @@ public partial class MainWindow : Window
 
     private readonly VoskEngine _vosk = new();
     private readonly OpenAiWhisperClient _openAi = new();
+    private readonly ElevenLabsSpeechClient _elevenLabs = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly SemaphoreSlim _apiGate = new(1, 1);
     private readonly object _liveSync = new();
@@ -34,75 +35,143 @@ public partial class MainWindow : Window
     private bool _isLive;
     private bool _busy;
     private bool _ttsPlaying;
+    private string? _lastFinalRaw;
+    private string? _selectedAudioFile;
+    private string _apiKey = string.Empty;
+    private string _elevenLabsKey = string.Empty;
+    private bool _suppressInstalledModelSelection;
 
     public MainWindow()
     {
         InitializeComponent();
-        VoskModelCombo.ItemsSource = VoskModelManager.EnglishModels;
         TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
         LoadSettingsIntoUi();
         RefreshSources();
-        UpdateEnginePanels();
+        RefreshEngineSelector();
         SetStatus("Ready", IdleBrush);
 
         var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (!string.IsNullOrWhiteSpace(envKey))
         {
-            ApiKeyBox.Password = envKey;
+            _apiKey = envKey;
+        }
+
+        var elevenKey = Environment.GetEnvironmentVariable("ELEVENLABS_API_KEY");
+        if (!string.IsNullOrWhiteSpace(elevenKey))
+        {
+            _elevenLabsKey = elevenKey;
         }
     }
 
-    private bool UseLocalEngine => EngineCombo.SelectedIndex == 0;
+    private bool UseLocalEngine =>
+        string.Equals(_settings.Engine, "Local", StringComparison.OrdinalIgnoreCase);
+
+    private bool UseElevenLabs =>
+        string.Equals(_settings.Engine, "ElevenLabs", StringComparison.OrdinalIgnoreCase);
 
     private void LoadSettingsIntoUi()
     {
-        EngineCombo.SelectedIndex = string.Equals(_settings.Engine, "Api", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-        ModelPathBox.Text = !string.IsNullOrWhiteSpace(_settings.ModelPath)
-            ? _settings.ModelPath
-            : (VoskModelManager.LooksLikeModel(VoskModelManager.DefaultSmallEnglishPath)
-                ? VoskModelManager.DefaultSmallEnglishPath
-                : string.Empty);
-        VoskModelCombo.SelectedItem = VoskModelManager.FindOptionForPath(ModelPathBox.Text)
-                                      ?? VoskModelManager.EnglishModels[0];
         TtsVoiceCombo.SelectedItem = TtsVoiceCatalog.Voices.FirstOrDefault(v => v.Id == _settings.TtsVoiceId)
                                      ?? TtsVoiceCatalog.Voices[0];
-        TranslateCheck.IsChecked = _settings.TranslateToEnglish;
-        SelectComboItem(WhisperModelCombo, _settings.WhisperModel);
+        if (string.IsNullOrWhiteSpace(_settings.ModelPath)
+            && VoskModelManager.LooksLikeModel(VoskModelManager.DefaultSmallEnglishPath))
+        {
+            _settings.ModelPath = VoskModelManager.DefaultSmallEnglishPath;
+        }
     }
 
     private void PersistSettings()
     {
-        _settings.Engine = UseLocalEngine ? "Local" : "Api";
-        _settings.ModelPath = ModelPathBox.Text.Trim();
-        _settings.TranslateToEnglish = TranslateCheck.IsChecked == true;
-        _settings.WhisperModel = SelectedComboText(WhisperModelCombo) ?? "whisper-1";
         _settings.TtsVoiceId = (TtsVoiceCombo.SelectedItem as TtsVoiceOption)?.Id ?? "lessac";
         _settings.Save();
     }
 
-    private void EngineCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        if (!IsLoaded)
+        if (_isLive || _busy)
         {
             return;
         }
 
-        UpdateEnginePanels();
+        var dialog = new SettingsWindow(_settings, _apiKey, _elevenLabsKey) { Owner = this };
+        dialog.ShowDialog();
+        _apiKey = dialog.OpenAiKey;
+        _elevenLabsKey = dialog.ElevenLabsKey;
+        RefreshEngineSelector();
     }
 
-    private void UpdateEnginePanels()
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void About_Click(object sender, RoutedEventArgs e)
     {
-        LocalSettingsPanel.Visibility = UseLocalEngine ? Visibility.Visible : Visibility.Collapsed;
-        ApiSettingsPanel.Visibility = UseLocalEngine ? Visibility.Collapsed : Visibility.Visible;
+        new AboutWindow { Owner = this }.ShowDialog();
+    }
+
+    private void RefreshEngineSelector()
+    {
+        _suppressInstalledModelSelection = true;
+        try
+        {
+            if (UseLocalEngine)
+            {
+                var items = VoskModelManager.ListInstalled(_settings.ModelPath);
+                InstalledModelCombo.ItemsSource = items;
+                if (items.Count == 0)
+                {
+                    InstalledModelCombo.Visibility = Visibility.Collapsed;
+                    CloudEngineLabel.Visibility = Visibility.Visible;
+                    CloudEngineLabel.Text = "No Vosk model downloaded — open File → Settings";
+                    return;
+                }
+
+                InstalledModelCombo.Visibility = Visibility.Visible;
+                CloudEngineLabel.Visibility = Visibility.Collapsed;
+                InstalledModelCombo.SelectedItem = items.FirstOrDefault(item =>
+                    string.Equals(item.Path, _settings.ModelPath, StringComparison.OrdinalIgnoreCase))
+                    ?? items[0];
+                if (InstalledModelCombo.SelectedItem is InstalledVoskModel selected)
+                {
+                    _settings.ModelPath = selected.Path;
+                }
+
+                return;
+            }
+
+            InstalledModelCombo.Visibility = Visibility.Collapsed;
+            CloudEngineLabel.Visibility = Visibility.Visible;
+            CloudEngineLabel.Text = UseElevenLabs
+                ? $"ElevenLabs · {_settings.ElevenLabsModel}"
+                : $"OpenAI Whisper API · {_settings.WhisperModel}";
+        }
+        finally
+        {
+            _suppressInstalledModelSelection = false;
+        }
+    }
+
+    private void InstalledModelCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _suppressInstalledModelSelection)
+        {
+            return;
+        }
+
+        if (InstalledModelCombo.SelectedItem is not InstalledVoskModel model)
+        {
+            return;
+        }
+
+        _settings.ModelPath = model.Path;
+        _settings.Save();
     }
 
     private void RefreshSources_Click(object sender, RoutedEventArgs e) => RefreshSources();
 
     private void RefreshSources()
     {
-        var previousId = (SourcesList.SelectedItem as AudioInputSource)?.Id;
+        var previousId = (SourcesCombo.SelectedItem as AudioInputSource)?.Id;
         var sources = AudioDeviceCatalog.ListSources();
-        SourcesList.ItemsSource = sources;
+        SourcesCombo.ItemsSource = sources;
         if (sources.Count == 0)
         {
             SetStatus("No audio input devices were found.", ErrorBrush);
@@ -110,102 +179,10 @@ public partial class MainWindow : Window
         }
 
         var match = sources.FirstOrDefault(s => s.Id == previousId);
-        SourcesList.SelectedItem = match ?? sources[0];
+        SourcesCombo.SelectedItem = match ?? sources[0];
         if (!_isLive && !_busy)
         {
             SetStatus("Ready", IdleBrush);
-        }
-    }
-
-    private async void BrowseModel_Click(object sender, RoutedEventArgs e)
-    {
-        if (_busy || _isLive)
-        {
-            return;
-        }
-
-        var dialog = new OpenFolderDialog
-        {
-            Title = "Select a Vosk model folder",
-            Multiselect = false
-        };
-
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
-        var found = VoskModelManager.FindModelFolder(dialog.FolderName);
-        if (found is null)
-        {
-            MessageBox.Show(
-                this,
-                "That folder does not look like a Vosk model. Choose the extracted model directory (it contains am, conf, or graph).",
-                "Speech Handler",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
-
-        ModelPathBox.Text = found;
-        PersistSettings();
-        await Task.CompletedTask;
-    }
-
-    private async void DownloadModel_Click(object sender, RoutedEventArgs e)
-    {
-        if (_busy || _isLive)
-        {
-            return;
-        }
-
-        if (VoskModelCombo.SelectedItem is not VoskModelOption model)
-        {
-            MessageBox.Show(this, "Select a Vosk model to download.", "Speech Handler",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        if (model.ConfirmLargeDownload)
-        {
-            var confirm = MessageBox.Show(
-                this,
-                $"{model.DisplayName} is a large download and needs several gigabytes of disk space. Continue?",
-                "Download Vosk model",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (confirm != MessageBoxResult.Yes)
-            {
-                return;
-            }
-        }
-
-        var cts = BeginWork($"Downloading {model.FolderName}…", determinate: true);
-        try
-        {
-            var progress = new Progress<double>(value =>
-            {
-                ProcessingBar.IsIndeterminate = false;
-                ProcessingBar.Value = value;
-                ProcessingMessage.Text = $"Downloading {model.FolderName}… {value:0}%";
-            });
-
-            var path = await VoskModelManager.DownloadAsync(model, progress, cts.Token);
-            ModelPathBox.Text = path;
-            PersistSettings();
-            SetStatus($"{model.FolderName} is ready.", IdleBrush);
-        }
-        catch (OperationCanceledException)
-        {
-            SetStatus("Download canceled.", IdleBrush);
-        }
-        catch (Exception ex)
-        {
-            ShowError("Could not download the Vosk model.", ex);
-        }
-        finally
-        {
-            EndWork();
         }
     }
 
@@ -216,7 +193,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (SourcesList.SelectedItem is not AudioInputSource source)
+        if (SourcesCombo.SelectedItem is not AudioInputSource source)
         {
             MessageBox.Show(this, "Select a microphone or system-audio source first.", "Speech Handler",
                 MessageBoxButton.OK, MessageBoxImage.Information);
@@ -242,6 +219,8 @@ public partial class MainWindow : Window
                 _liveApiBuffer = UseLocalEngine ? null : new MemoryStream();
             }
 
+            _lastFinalRaw = null;
+
             _capture = new LiveAudioCapture(source.Id, source.Kind);
             _capture.PcmAvailable += OnLivePcm;
             _capture.Stopped += OnCaptureStopped;
@@ -251,8 +230,8 @@ public partial class MainWindow : Window
             ProcessingMessage.Text = $"Processing live audio from {source.DisplayName}…";
             ProcessingBar.IsIndeterminate = true;
             ProcessingOverlay.Visibility = Visibility.Visible;
-            SetLiveUi(true);
             SetStatus($"Processing live audio from {source.DisplayName}…", LiveBrush);
+            UpdateActionButtons();
         }
         catch (OperationCanceledException)
         {
@@ -274,6 +253,7 @@ public partial class MainWindow : Window
             {
                 _busy = false;
                 CancelProcessingButton.IsEnabled = true;
+                UpdateActionButtons();
             }
         }
     }
@@ -304,7 +284,7 @@ public partial class MainWindow : Window
         {
             if (vosk is not null)
             {
-                AppendFinal(vosk.Finish());
+                AppendFinal(vosk.Finish(), formatAsSentences: true);
                 vosk.Dispose();
             }
             else if (apiBuffer is { Length: > 0 })
@@ -329,6 +309,23 @@ public partial class MainWindow : Window
         SetStatus("Ready", IdleBrush);
     }
 
+    private void ChooseFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isLive || _busy)
+        {
+            return;
+        }
+
+        var dialog = CreateAudioOpenDialog();
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        ShowSelectedFile(dialog.FileName);
+        UpdateActionButtons();
+    }
+
     private async void TranscribeFile_Click(object sender, RoutedEventArgs e)
     {
         if (_isLive || _busy)
@@ -336,18 +333,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new OpenFileDialog
+        if (string.IsNullOrWhiteSpace(_selectedAudioFile) || !File.Exists(_selectedAudioFile))
         {
-            Title = "Choose an audio file",
-            Filter = "Audio files|*.wav;*.mp3;*.m4a;*.mp4;*.wma;*.flac;*.ogg;*.aac;*.webm|All files|*.*"
-        };
-
-        if (dialog.ShowDialog(this) != true)
-        {
+            MessageBox.Show(this, "Choose an audio file first.", "Speech Handler",
+                MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
+        var path = _selectedAudioFile;
         var cts = BeginWork("Processing audio file…");
+        _lastFinalRaw = null;
         try
         {
             if (UseLocalEngine)
@@ -355,15 +350,15 @@ public partial class MainWindow : Window
                 ProcessingMessage.Text = "Loading speech model…";
                 await PrepareLocalModelAsync(cts.Token);
                 ProcessingMessage.Text = "Processing audio file…";
-                await TranscribeFileLocalAsync(dialog.FileName, cts.Token);
+                await TranscribeFileLocalAsync(path, cts.Token);
             }
             else
             {
                 ValidateApiKey();
-                await TranscribeFileApiAsync(dialog.FileName, cts.Token);
+                await TranscribeFileApiAsync(path, cts.Token);
             }
 
-            SetStatus($"Transcribed {Path.GetFileName(dialog.FileName)}.", IdleBrush);
+            SetStatus($"Transcribed {Path.GetFileName(path)}.", IdleBrush);
         }
         catch (OperationCanceledException)
         {
@@ -377,6 +372,26 @@ public partial class MainWindow : Window
         {
             EndWork();
         }
+    }
+
+    private static OpenFileDialog CreateAudioOpenDialog() =>
+        new()
+        {
+            Title = "Choose an audio file",
+            Filter = "Audio files|*.wav;*.mp3;*.m4a;*.mp4;*.wma;*.flac;*.ogg;*.aac;*.webm|All files|*.*"
+        };
+
+    private void ShowSelectedFile(string path)
+    {
+        var details = AudioFileInspector.Read(path);
+        _selectedAudioFile = details.Path;
+        SelectedFileName.Text = details.FileName;
+        SelectedFileName.ToolTip = details.Path;
+        SelectedFileDuration.Text = details.Duration;
+        SelectedFileSize.Text = details.Size;
+        SelectedFileFormat.Text = details.Format;
+        FilePlaceholder.Visibility = Visibility.Collapsed;
+        FileDetailsPanel.Visibility = Visibility.Visible;
     }
 
     private void CancelProcessing_Click(object sender, RoutedEventArgs e)
@@ -422,6 +437,7 @@ public partial class MainWindow : Window
     {
         TranscriptBox.Clear();
         PartialText.Text = string.Empty;
+        _lastFinalRaw = null;
         if (!_isLive && !_busy)
         {
             SetStatus("Ready", IdleBrush);
@@ -495,9 +511,7 @@ public partial class MainWindow : Window
             else
             {
                 HideOverlay();
-                EngineCombo.IsEnabled = !_isLive;
-                StartLiveButton.IsEnabled = !_isLive;
-                SourcesList.IsEnabled = !_isLive;
+                UpdateActionButtons();
             }
         }
     }
@@ -570,15 +584,16 @@ public partial class MainWindow : Window
 
     private async Task PrepareLocalModelAsync(CancellationToken cancellationToken)
     {
-        var path = ModelPathBox.Text.Trim();
+        var path = _settings.ModelPath?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new InvalidOperationException("Download or browse to a Vosk model folder first.");
+            throw new InvalidOperationException("Choose File → Settings and download or browse to a Vosk model folder first.");
         }
 
         var resolved = VoskModelManager.FindModelFolder(path)
-                       ?? throw new InvalidOperationException("The selected path is not a valid Vosk model folder.");
-        ModelPathBox.Text = resolved;
+                       ?? throw new InvalidOperationException("The selected path is not a valid Vosk model folder. Update it in File → Settings.");
+        _settings.ModelPath = resolved;
+        _settings.Save();
 
         await Task.Run(() =>
         {
@@ -602,7 +617,7 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
                 if (session.Accept(buffer, read, out var final, out var partial))
                 {
-                    Dispatcher.Invoke(() => AppendFinal(final));
+                    Dispatcher.Invoke(() => AppendFinal(final, formatAsSentences: true));
                 }
                 else
                 {
@@ -613,7 +628,7 @@ public partial class MainWindow : Window
             var last = session.Finish();
             Dispatcher.Invoke(() =>
             {
-                AppendFinal(last);
+                AppendFinal(last, formatAsSentences: true);
                 PartialText.Text = string.Empty;
             });
         }, cancellationToken);
@@ -632,12 +647,7 @@ public partial class MainWindow : Window
             }, cancellationToken);
 
             var wavBytes = await File.ReadAllBytesAsync(temp, cancellationToken);
-            var text = await _openAi.TranscribeAsync(
-                wavBytes,
-                ApiKeyBox.Password,
-                SelectedWhisperModel(),
-                TranslateCheck.IsChecked == true,
-                cancellationToken);
+            var text = await TranscribeCloudAsync(wavBytes, cancellationToken);
             AppendFinal(text);
         }
         finally
@@ -680,7 +690,7 @@ public partial class MainWindow : Window
             {
                 if (accepted)
                 {
-                    Dispatcher.BeginInvoke(() => AppendFinal(final));
+                    Dispatcher.BeginInvoke(() => AppendFinal(final, formatAsSentences: true));
                 }
                 else
                 {
@@ -732,12 +742,7 @@ public partial class MainWindow : Window
         await _apiGate.WaitAsync(cancellationToken);
         try
         {
-            var text = await _openAi.TranscribePcmAsync(
-                pcm,
-                ApiKeyBox.Password,
-                SelectedWhisperModel(),
-                TranslateCheck.IsChecked == true,
-                cancellationToken);
+            var text = await TranscribeCloudPcmAsync(pcm, cancellationToken);
             await Dispatcher.InvokeAsync(() => AppendFinal(text));
         }
         catch (OperationCanceledException)
@@ -790,7 +795,7 @@ public partial class MainWindow : Window
             }
         }
 
-        SetLiveUi(false);
+        UpdateActionButtons();
     }
 
     private CancellationTokenSource BeginWork(string message, bool determinate = false, bool showOverlay = true)
@@ -798,9 +803,7 @@ public partial class MainWindow : Window
         _busy = true;
         _workCts?.Cancel();
         _workCts = new CancellationTokenSource();
-        EngineCombo.IsEnabled = false;
-        StartLiveButton.IsEnabled = false;
-        SourcesList.IsEnabled = false;
+        UpdateActionButtons();
         SetStatus(message, ProcessingBrush);
         if (showOverlay)
         {
@@ -817,37 +820,76 @@ public partial class MainWindow : Window
     {
         _busy = false;
         HideOverlay();
-        EngineCombo.IsEnabled = true;
-        StartLiveButton.IsEnabled = true;
-        SourcesList.IsEnabled = true;
-        SetLiveUi(false);
+        UpdateActionButtons();
         PersistSettings();
     }
 
     private void HideOverlay() => ProcessingOverlay.Visibility = Visibility.Collapsed;
 
-    private void SetLiveUi(bool listening)
+    private void UpdateActionButtons()
     {
-        StartLiveButton.IsEnabled = !listening && !_busy;
-        StopLiveButton.IsEnabled = listening;
-        EngineCombo.IsEnabled = !listening && !_busy;
-        SourcesList.IsEnabled = !listening && !_busy;
+        var idle = !_isLive && !_busy;
+        SettingsMenuItem.IsEnabled = idle;
+        InstalledModelCombo.IsEnabled = idle;
+        SourcesCombo.IsEnabled = idle;
+        RefreshSourcesButton.IsEnabled = idle;
+        StartLiveButton.IsEnabled = idle;
+        StopLiveButton.IsEnabled = _isLive;
+        ChooseFileButton.IsEnabled = idle;
+        TranscribeFileButton.IsEnabled = idle && !string.IsNullOrWhiteSpace(_selectedAudioFile);
     }
 
-    private void AppendFinal(string? text)
+    private void AppendFinal(string? text, bool formatAsSentences = false)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return;
         }
 
-        text = text.Trim();
+        var original = text.Trim();
+        var incoming = original;
+        if (_lastFinalRaw is not null)
+        {
+            if (incoming.Equals(_lastFinalRaw, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // Vosk's final flush can repeat the previous utterance and then continue.
+            if (_lastFinalRaw.Length >= 16
+                && incoming.StartsWith(_lastFinalRaw, StringComparison.OrdinalIgnoreCase))
+            {
+                var at = _lastFinalRaw.Length;
+                if (at == incoming.Length || char.IsWhiteSpace(incoming[at]))
+                {
+                    incoming = incoming[at..].TrimStart();
+                    if (incoming.Length == 0)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
+        _lastFinalRaw = original;
+        var prepared = TranscriptText.Prepare(TranscriptBox.Text, incoming, formatAsSentences);
+        if (!string.Equals(TranscriptBox.Text, prepared.Existing, StringComparison.Ordinal))
+        {
+            TranscriptBox.Text = prepared.Existing;
+        }
+
+        if (prepared.Incoming.Length == 0)
+        {
+            PartialText.Text = string.Empty;
+            return;
+        }
+
         if (TranscriptBox.Text.Length > 0 && !char.IsWhiteSpace(TranscriptBox.Text[^1]))
         {
             TranscriptBox.AppendText(" ");
         }
 
-        TranscriptBox.AppendText(text);
+        TranscriptBox.AppendText(prepared.Incoming);
         TranscriptBox.ScrollToEnd();
         PartialText.Text = string.Empty;
     }
@@ -865,47 +907,61 @@ public partial class MainWindow : Window
 
     private void ValidateApiKey()
     {
-        if (string.IsNullOrWhiteSpace(ApiKeyBox.Password))
+        if (UseElevenLabs)
         {
-            throw new InvalidOperationException("Enter an OpenAI API key, or set the OPENAI_API_KEY environment variable.");
+            if (string.IsNullOrWhiteSpace(_elevenLabsKey))
+            {
+                throw new InvalidOperationException("Enter an ElevenLabs API key in File → Settings, or set the ELEVENLABS_API_KEY environment variable.");
+            }
+
+            return;
         }
+
+        if (string.IsNullOrWhiteSpace(_apiKey))
+        {
+            throw new InvalidOperationException("Enter an OpenAI API key in File → Settings, or set the OPENAI_API_KEY environment variable.");
+        }
+    }
+
+    private Task<string> TranscribeCloudAsync(byte[] wavBytes, CancellationToken cancellationToken)
+    {
+        if (UseElevenLabs)
+        {
+            return _elevenLabs.TranscribeAsync(
+                wavBytes,
+                _elevenLabsKey,
+                string.IsNullOrWhiteSpace(_settings.ElevenLabsModel) ? "scribe_v2" : _settings.ElevenLabsModel,
+                cancellationToken);
+        }
+
+        return _openAi.TranscribeAsync(
+            wavBytes,
+            _apiKey,
+            SelectedWhisperModel(),
+            _settings.TranslateToEnglish,
+            cancellationToken);
+    }
+
+    private Task<string> TranscribeCloudPcmAsync(byte[] pcm16kMono, CancellationToken cancellationToken)
+    {
+        var wav = Pcm16kMonoConverter.ToWavBytes(pcm16kMono);
+        return TranscribeCloudAsync(wav, cancellationToken);
     }
 
     private string SelectedWhisperModel()
     {
-        var selected = SelectedComboText(WhisperModelCombo) ?? "whisper-1";
-        if (TranslateCheck.IsChecked == true)
+        if (_settings.TranslateToEnglish)
         {
             return "whisper-1";
         }
 
-        return selected;
+        return string.IsNullOrWhiteSpace(_settings.WhisperModel) ? "whisper-1" : _settings.WhisperModel;
     }
 
     private void ShowError(string title, Exception ex)
     {
         SetStatus(title, ErrorBrush);
         MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
-    }
-
-    private static string? SelectedComboText(ComboBox combo) =>
-        (combo.SelectedItem as ComboBoxItem)?.Content?.ToString();
-
-    private static void SelectComboItem(ComboBox combo, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return;
-        }
-
-        foreach (var item in combo.Items.OfType<ComboBoxItem>())
-        {
-            if (string.Equals(item.Content?.ToString(), value, StringComparison.OrdinalIgnoreCase))
-            {
-                combo.SelectedItem = item;
-                return;
-            }
-        }
     }
 
     private static SolidColorBrush BrushFrom(string hex)
