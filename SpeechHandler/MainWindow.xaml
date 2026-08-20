@@ -171,12 +171,16 @@
                     </DockPanel>
                     <TextBlock x:Name="PartialText" DockPanel.Dock="Bottom" Style="{StaticResource MutedText}"
                                FontStyle="Italic" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                    <TextBox x:Name="TranscriptBox"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             HorizontalScrollBarVisibility="Disabled"
-                             FontSize="15"/>
+                    <AdornerDecorator>
+                        <TextBox x:Name="TranscriptBox"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 FontSize="15"
+                                 SpellCheck.IsEnabled="True"
+                                 Language="en-US"/>
+                    </AdornerDecorator>
                 </DockPanel>
             </Border>
 

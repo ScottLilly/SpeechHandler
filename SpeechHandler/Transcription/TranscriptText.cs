@@ -19,13 +19,13 @@ internal static class TranscriptText
         var (alignedExisting, alignedIncoming) = AlignOverlap(existing, incoming);
         if (formatAsSentences && alignedIncoming.Length > 0)
         {
-            alignedIncoming = FormatAsSentences(alignedIncoming);
+            alignedIncoming = FormatAsSentences(alignedIncoming, alignedExisting);
         }
 
         return new PreparedTranscript(alignedExisting, alignedIncoming);
     }
 
-    public static string FormatAsSentences(string text)
+    public static string FormatAsSentences(string text, string existing)
     {
         text = text.Trim();
         if (text.Length == 0)
@@ -34,13 +34,8 @@ internal static class TranscriptText
         }
 
         text = Regex.Replace(text, @"\bi\b", "I");
-        text = CapitalizeSentenceStarts(text);
-        if (!EndsWithSentencePunctuation(text))
-        {
-            text += ".";
-        }
-
-        return text;
+        var capitalizeFirst = existing.Length == 0 || EndsWithSentencePunctuation(existing);
+        return CapitalizeSentenceStarts(text, capitalizeFirst);
     }
 
     internal static (string Existing, string Incoming) AlignOverlap(string existing, string incoming)
@@ -92,10 +87,10 @@ internal static class TranscriptText
         return (existing, incoming);
     }
 
-    private static string CapitalizeSentenceStarts(string text)
+    private static string CapitalizeSentenceStarts(string text, bool capitalizeFirst)
     {
         var chars = text.ToCharArray();
-        var capitalizeNext = true;
+        var capitalizeNext = capitalizeFirst;
         for (var i = 0; i < chars.Length; i++)
         {
             if (capitalizeNext && char.IsLetter(chars[i]))

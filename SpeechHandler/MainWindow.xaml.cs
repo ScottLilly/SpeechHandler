@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        TranscriptSpelling.Attach(TranscriptBox);
         TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
         LoadSettingsIntoUi();
 
@@ -128,6 +129,7 @@ public partial class MainWindow : Window
             var language = ResolveCurrentLanguage(installed, languages);
             LanguageCombo.SelectedItem = language;
             FillModelCombo(language, installed, persist: false);
+            TranscriptSpelling.ApplyLanguage(TranscriptBox, language);
         }
         finally
         {
@@ -262,7 +264,9 @@ public partial class MainWindow : Window
         _suppressInstalledModelSelection = true;
         try
         {
-            FillModelCombo(LanguageCombo.SelectedItem as string, installed, persist: true);
+            var language = LanguageCombo.SelectedItem as string;
+            FillModelCombo(language, installed, persist: true);
+            TranscriptSpelling.ApplyLanguage(TranscriptBox, language);
         }
         finally
         {
@@ -694,6 +698,7 @@ public partial class MainWindow : Window
     private async void Window_Closed(object? sender, EventArgs e)
     {
         PersistSettings();
+        TranscriptSpelling.Detach();
         _workCts?.Cancel();
         StopTtsPlayback();
         CleanupLive();

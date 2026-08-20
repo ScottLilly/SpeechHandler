@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Transcribe live audio and files with a local Vosk model or a cloud speech API.")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+afe7c93dba5a037f75d8d65cc9ded4c04c6b6412")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+df848cfcc2d20485b45ba35fe0fd9d91de576a93")]
 [assembly: System.Reflection.AssemblyProductAttribute("Speech Handler")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SpeechHandler")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

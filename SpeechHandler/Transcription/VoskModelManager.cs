@@ -16,6 +16,10 @@ internal static class AppStorage
     public static string TtsVoicesDirectory { get; } = Path.Combine(Root, "tts");
 
     public static string SettingsPath { get; } = Path.Combine(Root, "settings.json");
+
+    public static string DictionariesDirectory { get; } = Path.Combine(Root, "dictionaries");
+
+    public static string LegacyDictionaryPath { get; } = Path.Combine(Root, "custom-words.dic");
 }
 
 internal sealed class AppSettings
