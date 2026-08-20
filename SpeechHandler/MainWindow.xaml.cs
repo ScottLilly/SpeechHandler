@@ -46,9 +46,6 @@ public partial class MainWindow : Window
         InitializeComponent();
         TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
         LoadSettingsIntoUi();
-        RefreshSources();
-        RefreshEngineSelector();
-        SetStatus("Ready", IdleBrush);
 
         var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (!string.IsNullOrWhiteSpace(envKey))
@@ -61,6 +58,10 @@ public partial class MainWindow : Window
         {
             _elevenLabsKey = elevenKey;
         }
+
+        RefreshSources();
+        RefreshEngineSelector();
+        SetStatus("Ready", IdleBrush);
     }
 
     private bool UseLocalEngine =>
@@ -107,45 +108,75 @@ public partial class MainWindow : Window
         new AboutWindow { Owner = this }.ShowDialog();
     }
 
+    private bool OpenAiConfigured => !string.IsNullOrWhiteSpace(_apiKey);
+
+    private bool ElevenLabsConfigured => !string.IsNullOrWhiteSpace(_elevenLabsKey);
+
     private void RefreshEngineSelector()
     {
         _suppressInstalledModelSelection = true;
         try
         {
-            if (UseLocalEngine)
+            var items = new List<TranscriptionOption>();
+            foreach (var model in VoskModelManager.ListInstalled(_settings.ModelPath))
             {
-                var items = VoskModelManager.ListInstalled(_settings.ModelPath);
-                InstalledModelCombo.ItemsSource = items;
-                if (items.Count == 0)
-                {
-                    InstalledModelCombo.Visibility = Visibility.Collapsed;
-                    CloudEngineLabel.Visibility = Visibility.Visible;
-                    CloudEngineLabel.Text = "No Vosk model downloaded — open File → Settings";
-                    return;
-                }
-
-                InstalledModelCombo.Visibility = Visibility.Visible;
-                CloudEngineLabel.Visibility = Visibility.Collapsed;
-                InstalledModelCombo.SelectedItem = items.FirstOrDefault(item =>
-                    string.Equals(item.Path, _settings.ModelPath, StringComparison.OrdinalIgnoreCase))
-                    ?? items[0];
-                if (InstalledModelCombo.SelectedItem is InstalledVoskModel selected)
-                {
-                    _settings.ModelPath = selected.Path;
-                }
-
-                return;
+                items.Add(new TranscriptionOption("Local", $"Vosk · {model.DisplayName}", model.Path));
             }
 
-            InstalledModelCombo.Visibility = Visibility.Collapsed;
-            CloudEngineLabel.Visibility = Visibility.Visible;
-            CloudEngineLabel.Text = UseElevenLabs
-                ? $"ElevenLabs · {_settings.ElevenLabsModel}"
-                : $"OpenAI Whisper API · {_settings.WhisperModel}";
+            if (OpenAiConfigured)
+            {
+                var whisper = string.IsNullOrWhiteSpace(_settings.WhisperModel) ? "whisper-1" : _settings.WhisperModel;
+                items.Add(new TranscriptionOption("Api", $"OpenAI Whisper · {whisper}"));
+            }
+
+            if (ElevenLabsConfigured)
+            {
+                var scribe = string.IsNullOrWhiteSpace(_settings.ElevenLabsModel) ? "scribe_v2" : _settings.ElevenLabsModel;
+                items.Add(new TranscriptionOption("ElevenLabs", $"ElevenLabs · {scribe}"));
+            }
+
+            InstalledModelCombo.ItemsSource = items;
+            var selected = items.FirstOrDefault(MatchesCurrentEngine) ?? items.FirstOrDefault();
+            InstalledModelCombo.SelectedItem = selected;
+            if (selected is not null)
+            {
+                ApplyTranscriptionOption(selected, persist: false);
+            }
+            else if (!UseLocalEngine)
+            {
+                _settings.Engine = "Local";
+            }
         }
         finally
         {
             _suppressInstalledModelSelection = false;
+        }
+    }
+
+    private bool MatchesCurrentEngine(TranscriptionOption option) =>
+        option.Engine switch
+        {
+            "Local" => UseLocalEngine
+                       && string.Equals(option.ModelPath, _settings.ModelPath, StringComparison.OrdinalIgnoreCase),
+            "Api" => UseOpenAiEngine,
+            "ElevenLabs" => UseElevenLabs,
+            _ => false
+        };
+
+    private bool UseOpenAiEngine =>
+        string.Equals(_settings.Engine, "Api", StringComparison.OrdinalIgnoreCase);
+
+    private void ApplyTranscriptionOption(TranscriptionOption option, bool persist)
+    {
+        _settings.Engine = option.Engine;
+        if (option.Engine == "Local" && !string.IsNullOrWhiteSpace(option.ModelPath))
+        {
+            _settings.ModelPath = option.ModelPath;
+        }
+
+        if (persist)
+        {
+            _settings.Save();
         }
     }
 
@@ -156,13 +187,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (InstalledModelCombo.SelectedItem is not InstalledVoskModel model)
+        if (InstalledModelCombo.SelectedItem is not TranscriptionOption option)
         {
             return;
         }
 
-        _settings.ModelPath = model.Path;
-        _settings.Save();
+        ApplyTranscriptionOption(option, persist: true);
     }
 
     private void RefreshSources_Click(object sender, RoutedEventArgs e) => RefreshSources();

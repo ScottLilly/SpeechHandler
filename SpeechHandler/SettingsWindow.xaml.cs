@@ -9,8 +9,9 @@ internal partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
     private bool _suppressModelSelection;
-    private CancellationTokenSource? _downloadCts;
     private bool _downloading;
+    private CancellationTokenSource? _downloadCts;
+    private string _modelFolderPath = string.Empty;
 
     public string OpenAiKey { get; private set; }
     public string ElevenLabsKey { get; private set; }
@@ -44,7 +45,7 @@ internal partial class SettingsWindow : Window
                 : (VoskModelManager.LooksLikeModel(VoskModelManager.DefaultSmallEnglishPath)
                     ? VoskModelManager.DefaultSmallEnglishPath
                     : string.Empty));
-            VoskModelCombo.SelectedItem = VoskModelManager.FindOptionForPath(ModelPathText.Text)
+            VoskModelCombo.SelectedItem = VoskModelManager.FindOptionForPath(ModelFolderPath)
                                           ?? VoskModelManager.EnglishModels[0];
             TranslateCheck.IsChecked = _settings.TranslateToEnglish;
             SelectComboItem(WhisperModelCombo, _settings.WhisperModel);
@@ -75,15 +76,24 @@ internal partial class SettingsWindow : Window
         _settings.Save();
     }
 
-    private string ModelFolderPath =>
-        string.Equals(ModelPathText.Text, "No folder selected", StringComparison.Ordinal)
-            ? string.Empty
-            : ModelPathText.Text.Trim();
+    private string ModelFolderPath => _modelFolderPath;
 
     private void SetModelPath(string? path)
     {
-        ModelPathText.Text = string.IsNullOrWhiteSpace(path) ? "No folder selected" : path;
-        ModelPathText.ToolTip = string.IsNullOrWhiteSpace(path) ? null : path;
+        _modelFolderPath = string.IsNullOrWhiteSpace(path)
+            ? string.Empty
+            : Path.GetFullPath(path.Trim());
+
+        if (string.IsNullOrWhiteSpace(_modelFolderPath))
+        {
+            ModelPathText.Text = "No folder selected";
+            ModelPathText.ToolTip = null;
+            return;
+        }
+
+        ModelPathText.Text = Path.GetFileName(
+            _modelFolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        ModelPathText.ToolTip = _modelFolderPath;
     }
 
     private void EngineCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -154,14 +164,103 @@ internal partial class SettingsWindow : Window
             Multiselect = false
         };
 
-        if (dialog.ShowDialog(this) != true)
+        var startFolder = ResolveBrowseStartFolder();
+        if (!string.IsNullOrWhiteSpace(startFolder))
+        {
+            dialog.InitialDirectory = startFolder;
+            dialog.DefaultDirectory = startFolder;
+            dialog.FolderName = startFolder;
+        }
+
+        if (dialog.ShowDialog(this) != true || string.IsNullOrWhiteSpace(dialog.FolderName))
         {
             return;
         }
 
-        var found = VoskModelManager.FindModelFolder(dialog.FolderName);
+        var selected = Path.GetFullPath(dialog.FolderName);
+        var current = ModelFolderPath;
+        if (!string.IsNullOrWhiteSpace(current)
+            && string.Equals(current, selected, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current) || !HasModelFiles(current))
+        {
+            ApplySelectedModelFolder(selected, moving: false);
+            return;
+        }
+
+        var folderName = Path.GetFileName(selected.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var choice = MessageBox.Show(
+            this,
+            $"Do you want to move the current model files into “{folderName}”?\n\n"
+            + "Yes — move the files and use the new folder.\n"
+            + "No — use the new folder without moving files.\n"
+            + "Cancel — keep the current folder.",
+            "Move model files?",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Question);
+
+        if (choice == MessageBoxResult.Cancel)
+        {
+            return;
+        }
+
+        if (choice == MessageBoxResult.Yes)
+        {
+            try
+            {
+                MoveModelFiles(current, selected);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Could not move the model files.",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            ApplySelectedModelFolder(selected, moving: true);
+            return;
+        }
+
+        ApplySelectedModelFolder(selected, moving: false);
+    }
+
+    private string? ResolveBrowseStartFolder()
+    {
+        if (!string.IsNullOrWhiteSpace(ModelFolderPath) && Directory.Exists(ModelFolderPath))
+        {
+            return ModelFolderPath;
+        }
+
+        var parent = Path.GetDirectoryName(ModelFolderPath);
+        if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+        {
+            return parent;
+        }
+
+        return Directory.Exists(AppStorage.ModelsDirectory) ? AppStorage.ModelsDirectory : null;
+    }
+
+    private void ApplySelectedModelFolder(string selected, bool moving)
+    {
+        var found = VoskModelManager.FindModelFolder(selected);
         if (found is null)
         {
+            if (moving)
+            {
+                MessageBox.Show(
+                    this,
+                    "The files were moved, but that folder does not look like a Vosk model.",
+                    "Settings",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                SetModelPath(selected);
+                SaveToSettings();
+                return;
+            }
+
             MessageBox.Show(
                 this,
                 "That folder does not look like a Vosk model. Choose the extracted model directory (it contains am, conf, or graph).",
@@ -173,6 +272,58 @@ internal partial class SettingsWindow : Window
 
         SetModelPath(found);
         SaveToSettings();
+    }
+
+    private static bool HasModelFiles(string path)
+    {
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(path).Any();
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static void MoveModelFiles(string source, string destination)
+    {
+        source = Path.GetFullPath(source);
+        destination = Path.GetFullPath(destination);
+        if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var sourcePrefix = source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                           + Path.DirectorySeparatorChar;
+        if (destination.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The new folder is inside the current model folder, so the files cannot be moved there.");
+        }
+
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.GetDirectories(source))
+        {
+            var destDir = Path.Combine(destination, Path.GetFileName(directory));
+            if (Directory.Exists(destDir))
+            {
+                throw new IOException($"The destination already contains a folder named “{Path.GetFileName(directory)}”.");
+            }
+
+            Directory.Move(directory, destDir);
+        }
+
+        foreach (var file in Directory.GetFiles(source))
+        {
+            var destFile = Path.Combine(destination, Path.GetFileName(file));
+            if (File.Exists(destFile))
+            {
+                throw new IOException($"The destination already contains a file named “{Path.GetFileName(file)}”.");
+            }
+
+            File.Move(file, destFile);
+        }
     }
 
     private async void DownloadModel_Click(object sender, RoutedEventArgs e)
@@ -235,7 +386,7 @@ internal partial class SettingsWindow : Window
             _downloading = false;
             _downloadCts?.Dispose();
             _downloadCts = null;
-            SetDownloadUi(false, DownloadMessage.Text);
+            SetDownloadUi(false, string.Empty);
         }
     }
 
@@ -263,9 +414,7 @@ internal partial class SettingsWindow : Window
 
     private void SetDownloadUi(bool downloading, string message)
     {
-        DownloadProgressPanel.Visibility = downloading || !string.IsNullOrWhiteSpace(message)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        DownloadProgressPanel.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;
         DownloadMessage.Text = message;
         DownloadBar.IsIndeterminate = downloading;
         if (!downloading)

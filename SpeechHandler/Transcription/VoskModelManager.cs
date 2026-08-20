@@ -72,6 +72,11 @@ internal sealed record InstalledVoskModel(string Id, string DisplayName, string 
     public override string ToString() => DisplayName;
 }
 
+internal sealed record TranscriptionOption(string Engine, string DisplayName, string? ModelPath = null)
+{
+    public override string ToString() => DisplayName;
+}
+
 internal static class VoskModelManager
 {
     public static IReadOnlyList<VoskModelOption> EnglishModels { get; } =

@@ -46,22 +46,23 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <DockPanel LastChildFill="False" Margin="0,0,0,12">
-                <TextBlock DockPanel.Dock="Left" FontSize="22" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimary}" Text="Speech Handler"
-                           VerticalAlignment="Center"/>
-                <ComboBox x:Name="InstalledModelCombo" DockPanel.Dock="Right" Width="360"
-                          DisplayMemberPath="DisplayName" Margin="16,0,0,0"
+            <DockPanel LastChildFill="True" Margin="0,0,0,12">
+                <TextBlock DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimary}"
+                           Text="Transcription model" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <ComboBox x:Name="InstalledModelCombo" MinWidth="360" MaxWidth="560"
+                          HorizontalAlignment="Left"
+                          DisplayMemberPath="DisplayName"
                           VerticalAlignment="Center"
                           SelectionChanged="InstalledModelCombo_SelectionChanged"/>
-                <TextBlock x:Name="CloudEngineLabel" DockPanel.Dock="Right" Margin="16,0,0,0"
-                           VerticalAlignment="Center" FontSize="13"
-                           Foreground="{StaticResource TextPrimary}"
-                           TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
             </DockPanel>
 
-            <TabControl Grid.Row="1" Margin="0,0,0,12">
-                <TabItem Header="Live transcription">
+            <TabControl Grid.Row="1" Margin="0,0,0,12" TabStripPlacement="Left">
+                <TabItem>
+                    <TabItem.Header>
+                        <TextBlock Text="Live transcription" TextWrapping="Wrap" TextAlignment="Center"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
+                    </TabItem.Header>
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
                                    FontSize="13" Foreground="{StaticResource TextPrimary}"
@@ -95,7 +96,11 @@
                         </StackPanel>
                     </DockPanel>
                 </TabItem>
-                <TabItem Header="Audio file">
+                <TabItem>
+                    <TabItem.Header>
+                        <TextBlock Text="Audio file" TextWrapping="Wrap" TextAlignment="Center"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
+                    </TabItem.Header>
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
                                    FontSize="13" Foreground="{StaticResource TextPrimary}"
