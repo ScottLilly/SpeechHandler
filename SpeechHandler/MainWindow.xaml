@@ -46,16 +46,29 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <DockPanel LastChildFill="True" Margin="0,0,0,12">
-                <TextBlock DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock FontSize="15" FontWeight="SemiBold"
                            Foreground="{StaticResource TextPrimary}"
-                           Text="Transcription model" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                <ComboBox x:Name="InstalledModelCombo" MinWidth="360" MaxWidth="560"
-                          HorizontalAlignment="Left"
+                           Text="Language" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                <ComboBox x:Name="LanguageCombo" Grid.Column="1" Margin="0,0,0,8"
+                          VerticalAlignment="Center" Width="560" HorizontalAlignment="Left"
+                          SelectionChanged="LanguageCombo_SelectionChanged"/>
+                <TextBlock Grid.Row="1" FontSize="15" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimary}"
+                           Text="Model/Service" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <ComboBox x:Name="InstalledModelCombo" Grid.Row="1" Grid.Column="1"
                           DisplayMemberPath="DisplayName"
-                          VerticalAlignment="Center"
+                          VerticalAlignment="Center" Width="560" HorizontalAlignment="Left"
                           SelectionChanged="InstalledModelCombo_SelectionChanged"/>
-            </DockPanel>
+            </Grid>
 
             <TabControl Grid.Row="1" Margin="0,0,0,12" TabStripPlacement="Left">
                 <TabItem>

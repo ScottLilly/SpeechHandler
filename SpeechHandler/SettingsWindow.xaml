@@ -36,7 +36,7 @@
                     <ComboBox x:Name="VoskLanguageCombo" Margin="0,0,8,0"
                               SelectionChanged="VoskLanguageCombo_SelectionChanged"/>
                 </Grid>
-                <Label Content="Model" Padding="0,12,0,6" HorizontalAlignment="Left"/>
+                <Label Content="Model file" Padding="0,12,0,6" HorizontalAlignment="Left"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -88,8 +88,6 @@
                     <Button x:Name="BrowseButton" Grid.Column="1" Style="{StaticResource SecondaryButton}"
                             Content="Browse…" Width="120" Click="BrowseModel_Click"/>
                 </Grid>
-                <TextBlock Style="{StaticResource MutedText}" Margin="0,8,0,0" TextWrapping="Wrap"
-                           Text="All downloaded Vosk models are stored in this folder."/>
                 <StackPanel x:Name="DownloadProgressPanel" Margin="0,12,0,0" Visibility="Collapsed">
                     <TextBlock x:Name="DownloadMessage" Text="Downloading…" Margin="0,0,0,8"/>
                     <ProgressBar x:Name="DownloadBar" IsIndeterminate="True"/>

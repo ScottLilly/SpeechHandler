@@ -69,7 +69,7 @@ internal sealed record VoskModelOption(
         IsDownloaded ? $"{DisplayName}  ·  downloaded" : DisplayName;
 }
 
-internal sealed record InstalledVoskModel(string Id, string DisplayName, string Path)
+internal sealed record InstalledVoskModel(string Id, string Language, string DisplayName, string Path)
 {
     public override string ToString() => DisplayName;
 }
@@ -212,7 +212,7 @@ internal static class VoskModelManager
             var path = FindInstalledPath(model, modelsDirectory);
             if (path is not null && seen.Add(path))
             {
-                items.Add(new InstalledVoskModel(model.Id, $"{model.Language} · {model.DisplayName}", path));
+                items.Add(new InstalledVoskModel(model.Id, model.Language, model.DisplayName, path));
             }
         }
 
@@ -225,7 +225,8 @@ internal static class VoskModelManager
                 {
                     items.Add(new InstalledVoskModel(
                         $"custom:{Path.GetFileName(found)}",
-                        $"Other · {Path.GetFileName(found)}",
+                        "Other",
+                        Path.GetFileName(found),
                         found));
                 }
             }
@@ -236,7 +237,7 @@ internal static class VoskModelManager
             var full = Path.GetFullPath(currentPath);
             if (seen.Add(full))
             {
-                items.Add(new InstalledVoskModel("custom", $"Custom — {Path.GetFileName(full)}", full));
+                items.Add(new InstalledVoskModel("custom", "Other", Path.GetFileName(full), full));
             }
         }
 

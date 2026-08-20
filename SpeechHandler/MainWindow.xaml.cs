@@ -39,7 +39,11 @@ public partial class MainWindow : Window
     private string? _selectedAudioFile;
     private string _apiKey = string.Empty;
     private string _elevenLabsKey = string.Empty;
+    private bool _suppressLanguageSelection;
     private bool _suppressInstalledModelSelection;
+
+    private const string OpenAiLanguage = "OpenAI Whisper";
+    private const string ElevenLabsLanguage = "ElevenLabs";
 
     public MainWindow()
     {
@@ -113,43 +117,109 @@ public partial class MainWindow : Window
 
     private void RefreshEngineSelector()
     {
+        _suppressLanguageSelection = true;
         _suppressInstalledModelSelection = true;
         try
         {
-            var items = new List<TranscriptionOption>();
-            foreach (var model in VoskModelManager.ListInstalled(
-                         VoskModelManager.ResolveModelsDirectory(_settings), _settings.ModelPath))
-            {
-                items.Add(new TranscriptionOption("Local", $"Vosk · {model.DisplayName}", model.Path));
-            }
-
-            if (OpenAiConfigured)
-            {
-                var whisper = string.IsNullOrWhiteSpace(_settings.WhisperModel) ? "whisper-1" : _settings.WhisperModel;
-                items.Add(new TranscriptionOption("Api", $"OpenAI Whisper · {whisper}"));
-            }
-
-            if (ElevenLabsConfigured)
-            {
-                var scribe = string.IsNullOrWhiteSpace(_settings.ElevenLabsModel) ? "scribe_v2" : _settings.ElevenLabsModel;
-                items.Add(new TranscriptionOption("ElevenLabs", $"ElevenLabs · {scribe}"));
-            }
-
-            InstalledModelCombo.ItemsSource = items;
-            var selected = items.FirstOrDefault(MatchesCurrentEngine) ?? items.FirstOrDefault();
-            InstalledModelCombo.SelectedItem = selected;
-            if (selected is not null)
-            {
-                ApplyTranscriptionOption(selected, persist: false);
-            }
-            else if (!UseLocalEngine)
-            {
-                _settings.Engine = "Local";
-            }
+            var installed = VoskModelManager.ListInstalled(
+                VoskModelManager.ResolveModelsDirectory(_settings), _settings.ModelPath);
+            var languages = BuildLanguageList(installed);
+            LanguageCombo.ItemsSource = languages;
+            var language = ResolveCurrentLanguage(installed, languages);
+            LanguageCombo.SelectedItem = language;
+            FillModelCombo(language, installed, persist: false);
         }
         finally
         {
+            _suppressLanguageSelection = false;
             _suppressInstalledModelSelection = false;
+        }
+    }
+
+    private List<string> BuildLanguageList(IReadOnlyList<InstalledVoskModel> installed)
+    {
+        var downloaded = installed.Select(model => model.Language).ToHashSet(StringComparer.Ordinal);
+        var languages = VoskModelManager.Languages.Where(downloaded.Contains).ToList();
+        foreach (var language in installed.Select(model => model.Language).Distinct())
+        {
+            if (!languages.Contains(language))
+            {
+                languages.Add(language);
+            }
+        }
+
+        if (OpenAiConfigured)
+        {
+            languages.Add(OpenAiLanguage);
+        }
+
+        if (ElevenLabsConfigured)
+        {
+            languages.Add(ElevenLabsLanguage);
+        }
+
+        return languages;
+    }
+
+    private string? ResolveCurrentLanguage(
+        IReadOnlyList<InstalledVoskModel> installed,
+        IReadOnlyList<string> languages)
+    {
+        if (UseOpenAiEngine && OpenAiConfigured)
+        {
+            return OpenAiLanguage;
+        }
+
+        if (UseElevenLabs && ElevenLabsConfigured)
+        {
+            return ElevenLabsLanguage;
+        }
+
+        var current = installed.FirstOrDefault(model =>
+            string.Equals(model.Path, _settings.ModelPath, StringComparison.OrdinalIgnoreCase));
+        if (current is not null)
+        {
+            return current.Language;
+        }
+
+        return languages.FirstOrDefault();
+    }
+
+    private void FillModelCombo(
+        string? language,
+        IReadOnlyList<InstalledVoskModel> installed,
+        bool persist)
+    {
+        var items = new List<TranscriptionOption>();
+        if (string.Equals(language, OpenAiLanguage, StringComparison.Ordinal) && OpenAiConfigured)
+        {
+            var whisper = string.IsNullOrWhiteSpace(_settings.WhisperModel) ? "whisper-1" : _settings.WhisperModel;
+            items.Add(new TranscriptionOption("Api", whisper));
+        }
+        else if (string.Equals(language, ElevenLabsLanguage, StringComparison.Ordinal) && ElevenLabsConfigured)
+        {
+            var scribe = string.IsNullOrWhiteSpace(_settings.ElevenLabsModel) ? "scribe_v2" : _settings.ElevenLabsModel;
+            items.Add(new TranscriptionOption("ElevenLabs", scribe));
+        }
+        else if (!string.IsNullOrWhiteSpace(language))
+        {
+            foreach (var model in installed.Where(item =>
+                         string.Equals(item.Language, language, StringComparison.Ordinal)))
+            {
+                items.Add(new TranscriptionOption("Local", model.DisplayName, model.Path));
+            }
+        }
+
+        InstalledModelCombo.ItemsSource = items;
+        var selected = items.FirstOrDefault(MatchesCurrentEngine) ?? items.FirstOrDefault();
+        InstalledModelCombo.SelectedItem = selected;
+        if (selected is not null)
+        {
+            ApplyTranscriptionOption(selected, persist);
+        }
+        else if (!UseLocalEngine)
+        {
+            _settings.Engine = "Local";
         }
     }
 
@@ -177,6 +247,26 @@ public partial class MainWindow : Window
         if (persist)
         {
             _settings.Save();
+        }
+    }
+
+    private void LanguageCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _suppressLanguageSelection)
+        {
+            return;
+        }
+
+        var installed = VoskModelManager.ListInstalled(
+            VoskModelManager.ResolveModelsDirectory(_settings), _settings.ModelPath);
+        _suppressInstalledModelSelection = true;
+        try
+        {
+            FillModelCombo(LanguageCombo.SelectedItem as string, installed, persist: true);
+        }
+        finally
+        {
+            _suppressInstalledModelSelection = false;
         }
     }
 
@@ -860,6 +950,7 @@ public partial class MainWindow : Window
     {
         var idle = !_isLive && !_busy;
         SettingsMenuItem.IsEnabled = idle;
+        LanguageCombo.IsEnabled = idle;
         InstalledModelCombo.IsEnabled = idle;
         SourcesCombo.IsEnabled = idle;
         RefreshSourcesButton.IsEnabled = idle;
