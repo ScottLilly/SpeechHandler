@@ -1,0 +1,170 @@
+﻿<Window x:Class="SpeechHandler.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Speech Handler"
+        Height="720" Width="980"
+        MinHeight="560" MinWidth="800"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource AppBg}"
+        Foreground="{StaticResource TextPrimary}"
+        TextElement.Foreground="{StaticResource TextPrimary}"
+        Closed="Window_Closed">
+    <DockPanel>
+        <Border x:Name="ProcessingOverlay" DockPanel.Dock="Top" Background="#252B33"
+                BorderBrush="#3D9CF0" BorderThickness="0,0,0,2" Padding="20,14" Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock x:Name="ProcessingMessage" Text="Processing…" FontSize="16" FontWeight="SemiBold"/>
+                    <ProgressBar x:Name="ProcessingBar" Margin="0,10,0,0" IsIndeterminate="True"/>
+                </StackPanel>
+                <Button x:Name="CancelProcessingButton" Grid.Column="1" Style="{StaticResource SecondaryButton}"
+                        Content="Cancel" Margin="16,0,0,0" VerticalAlignment="Center"
+                        Click="CancelProcessing_Click"/>
+            </Grid>
+        </Border>
+
+        <DockPanel Margin="20">
+            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                <TextBlock FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" Text="Speech Handler"/>
+                <TextBlock Style="{StaticResource MutedText}" Margin="0,4,0,0"
+                           Text="Transcribe microphones, system audio, or files with a local Vosk model or the OpenAI Whisper API."/>
+            </StackPanel>
+
+            <Border Style="{StaticResource Card}" DockPanel.Dock="Top">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.ColumnSpan="2" Style="{StaticResource SectionTitle}" Text="Speech engine"/>
+
+                    <Label Grid.Row="1" Content="Engine"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                        <ComboBox x:Name="EngineCombo" Width="220" SelectionChanged="EngineCombo_SelectionChanged">
+                            <ComboBoxItem Content="Local (Vosk)" IsSelected="True"/>
+                            <ComboBoxItem Content="OpenAI Whisper API"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel x:Name="LocalSettingsPanel" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,0,0">
+                        <Label Content="Vosk model" Padding="0,0,0,6" HorizontalAlignment="Left"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="VoskModelCombo" Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Download"
+                                    MinWidth="100" Click="DownloadModel_Click"/>
+                            <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Browse…"
+                                    Margin="8,0,0,0" MinWidth="90" Click="BrowseModel_Click"/>
+                        </Grid>
+                        <Label Content="Model folder" Padding="0,8,0,6" HorizontalAlignment="Left"/>
+                        <TextBox x:Name="ModelPathBox"/>
+                        <TextBlock Style="{StaticResource MutedText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Text="Small is fast. Medium is a good default. Large and extra-large are much more accurate and take longer to download."/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="ApiSettingsPanel" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,0,0" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="220"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,12,0">
+                                <Label Content="API key" Padding="0,0,0,6" HorizontalAlignment="Left"/>
+                                <PasswordBox x:Name="ApiKeyBox"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <Label Content="Model" Padding="0,0,0,6" HorizontalAlignment="Left"/>
+                                <ComboBox x:Name="WhisperModelCombo">
+                                    <ComboBoxItem Content="whisper-1" IsSelected="True"/>
+                                    <ComboBoxItem Content="gpt-4o-mini-transcribe"/>
+                                    <ComboBoxItem Content="gpt-4o-transcribe"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
+                        <CheckBox x:Name="TranslateCheck" Margin="0,12,0,0"
+                                  Content="Translate speech to English (Whisper translations endpoint)"/>
+                        <TextBlock Style="{StaticResource MutedText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Text="The key is not saved. OPENAI_API_KEY is used automatically if present."/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource Card}" DockPanel.Dock="Top">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <DockPanel>
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="Audio input sources" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource SecondaryButton}" Content="Refresh"
+                                    HorizontalAlignment="Right" MinWidth="80" Padding="10,4"
+                                    Click="RefreshSources_Click"/>
+                        </Grid>
+                        <ListBox x:Name="SourcesList" DisplayMemberPath="DisplayName" MinHeight="120"/>
+                    </DockPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Actions"/>
+                        <Button x:Name="StartLiveButton" Style="{StaticResource PrimaryButton}"
+                                Content="Start live transcription" Margin="0,0,0,8" Click="StartLive_Click"/>
+                        <Button x:Name="StopLiveButton" Style="{StaticResource DangerButton}"
+                                Content="Stop" Margin="0,0,0,8" IsEnabled="False" Click="StopLive_Click"/>
+                        <Button Style="{StaticResource SecondaryButton}" Content="Transcribe audio file…"
+                                Click="TranscribeFile_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource Card}" DockPanel.Dock="Bottom" Margin="0">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <ComboBox x:Name="TtsVoiceCombo" Width="240" VerticalAlignment="Center"/>
+                        <Button x:Name="SpeakButton" Style="{StaticResource PrimaryButton}" Content="Speak transcript"
+                                Margin="8,0,0,0" MinWidth="150" Click="Speak_Click"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource SecondaryButton}" Content="Copy" MinWidth="90" Click="Copy_Click"/>
+                        <Button Style="{StaticResource SecondaryButton}" Content="Save as…" MinWidth="90" Margin="8,0,0,0" Click="Save_Click"/>
+                        <Button Style="{StaticResource SecondaryButton}" Content="Clear" MinWidth="90" Margin="8,0,0,0" Click="Clear_Click"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                        <Ellipse x:Name="StatusDot" Width="10" Height="10" Fill="#6B7682" Margin="0,0,8,0"
+                                 VerticalAlignment="Center"/>
+                        <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                    </DockPanel>
+                    <TextBlock x:Name="PartialText" DockPanel.Dock="Bottom" Style="{StaticResource MutedText}"
+                               FontStyle="Italic" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    <TextBox x:Name="TranscriptBox"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Disabled"
+                             FontSize="15"/>
+                </DockPanel>
+            </Border>
+        </DockPanel>
+    </DockPanel>
+</Window>
