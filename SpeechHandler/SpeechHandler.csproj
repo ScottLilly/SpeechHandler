@@ -9,7 +9,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Product>Speech Handler</Product>
     <Description>Transcribe live audio and files with a local Vosk model or a cloud speech API.</Description>
     <ApplicationIcon />

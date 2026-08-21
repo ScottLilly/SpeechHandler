@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -38,11 +39,15 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly SemaphoreSlim _apiGate = new(1, 1);
     private readonly object _liveSync = new();
+    private readonly List<Task> _liveApiTasks = [];
 
     private LiveAudioCapture? _capture;
     private VoskSession? _liveVosk;
     private MemoryStream? _liveApiBuffer;
     private CancellationTokenSource? _workCts;
+    private int _workGeneration;
+    private int _liveWorkGeneration;
+    private bool _forceClose;
     private WaveOut? _ttsPlayer;
     private AudioFileReader? _ttsReader;
     private string? _ttsTempFile;
@@ -54,6 +59,9 @@ public partial class MainWindow : Window
     private bool _busy;
     private bool _closing;
     private bool _ttsPlaying;
+    private bool _ttsWork;
+    private bool _loadingModel;
+    private Task? _modelLoadTask;
     private string? _lastFinalRaw;
     private string? _selectedAudioFile;
     private string _apiKey = string.Empty;
@@ -67,6 +75,8 @@ public partial class MainWindow : Window
 
     private const string OpenAiLanguage = "OpenAI Whisper";
     private const string ElevenLabsLanguage = "ElevenLabs";
+    private const int MaxCloudUploadBytes = 24 * 1024 * 1024;
+    private const int CloudFileChunkPcmBytes = 10 * 60 * Pcm16kMonoConverter.SampleRate * 2;
 
     public MainWindow()
     {
@@ -74,7 +84,7 @@ public partial class MainWindow : Window
         TranscriptSpelling.Attach(TranscriptBox);
         TranscriptSpelling.Attach(SrtBox, skipSrtMetadata: true);
         TranscriptSpelling.WordCorrected = SyncSpellingCorrection;
-        _vosk.CacheChanged += (_, _) => Dispatcher.BeginInvoke(RefreshCacheUi);
+        _vosk.CacheChanged += Vosk_CacheChanged;
         _inputLevelTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(75) };
         _inputLevelTimer.Tick += InputLevelTimer_Tick;
         Loaded += (_, _) => EnsureInputMonitor();
@@ -179,9 +189,12 @@ public partial class MainWindow : Window
         }
 
         var dialog = new SettingsWindow(_settings, _apiKey, _elevenLabsKey) { Owner = this };
-        dialog.ShowDialog();
-        _apiKey = dialog.OpenAiKey;
-        _elevenLabsKey = dialog.ElevenLabsKey;
+        if (dialog.ShowDialog() == true)
+        {
+            _apiKey = dialog.OpenAiKey;
+            _elevenLabsKey = dialog.ElevenLabsKey;
+        }
+
         ApplyCacheBudget();
         RefreshEngineSelector();
         RefreshCacheUi();
@@ -464,6 +477,8 @@ public partial class MainWindow : Window
         }
 
         var cts = BeginWork("Processing…");
+        var generation = _workGeneration;
+        _liveWorkGeneration = generation;
         try
         {
             if (UseLocalEngine)
@@ -501,7 +516,7 @@ public partial class MainWindow : Window
             _capture.PcmAvailable += OnLivePcm;
             ProcessingMessage.Text = $"Processing live audio from {source.DisplayName}…";
             ProcessingBar.IsIndeterminate = true;
-            ProcessingOverlay.Visibility = Visibility.Visible;
+            ShowProcessingOverlay();
             SetStatus($"Processing live audio from {source.DisplayName}…", LiveBrush);
             UpdateActionButtons();
         }
@@ -515,18 +530,20 @@ public partial class MainWindow : Window
         {
             CleanupLive(disposeCapture: false);
             EnsureInputMonitor();
-            ShowError("Could not start live transcription.", ex);
+            if (!_closing)
+            {
+                ShowError("Could not start live transcription.", ex);
+            }
         }
         finally
         {
             if (!_isLive)
             {
-                EndWork();
+                EndWork(generation);
             }
-            else
+            else if (generation == _workGeneration)
             {
                 _busy = false;
-                CancelProcessingButton.IsEnabled = true;
                 UpdateActionButtons();
             }
         }
@@ -572,15 +589,21 @@ public partial class MainWindow : Window
             {
                 apiBuffer?.Dispose();
             }
+
+            await WaitForLiveApiTasksAsync();
         }
         catch (Exception ex)
         {
-            ShowError("Live transcription stopped with an error.", ex);
+            if (!_closing)
+            {
+                ShowError("Live transcription stopped with an error.", ex);
+            }
+
             return;
         }
 
         PartialText.Text = string.Empty;
-        EndWork();
+        EndWork(_liveWorkGeneration);
         EnsureInputMonitor();
         SetStatus("Ready", IdleBrush);
     }
@@ -618,6 +641,7 @@ public partial class MainWindow : Window
 
         var path = _selectedAudioFile;
         var cts = BeginWork("Processing audio file…");
+        var generation = _workGeneration;
         _lastFinalRaw = null;
         _sessionTimeOffset = NextSessionTimeOffset();
         try
@@ -648,11 +672,14 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ShowError("Could not transcribe that file.", ex);
+            if (!_closing)
+            {
+                ShowError("Could not transcribe that file.", ex);
+            }
         }
         finally
         {
-            EndWork();
+            EndWork(generation);
         }
     }
 
@@ -679,6 +706,7 @@ public partial class MainWindow : Window
     private void CancelProcessing_Click(object sender, RoutedEventArgs e)
     {
         _workCts?.Cancel();
+        StopTtsPlayback();
         if (_isLive)
         {
             _ = StopLiveAsync();
@@ -751,9 +779,15 @@ public partial class MainWindow : Window
 
     private async void Speak_Click(object sender, RoutedEventArgs e)
     {
-        if (_ttsPlaying)
+        if (_ttsPlaying || _ttsWork)
         {
+            _workCts?.Cancel();
             StopTtsPlayback();
+            return;
+        }
+
+        if (_isLive || _busy)
+        {
             return;
         }
 
@@ -763,15 +797,19 @@ public partial class MainWindow : Window
         }
 
         PersistSettings();
-        var cts = BeginWork("Preparing neural voice…");
+        _ttsWork = true;
         SpeakButton.Content = "Stop speaking";
+        var cts = BeginWork("Preparing neural voice…");
+        var generation = _workGeneration;
         try
         {
             var wavPath = await SynthesizeTranscriptWavAsync(text, voice, cts.Token);
             HideOverlay();
-            _busy = false;
             await PlayTtsAsync(wavPath, cts.Token);
-            SetStatus("Ready", IdleBrush);
+            if (!cts.IsCancellationRequested)
+            {
+                SetStatus("Ready", IdleBrush);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -783,26 +821,14 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (!_ttsPlaying)
-            {
-                SpeakButton.Content = "Speak transcript";
-            }
-
-            if (_busy)
-            {
-                EndWork();
-            }
-            else
-            {
-                HideOverlay();
-                UpdateActionButtons();
-            }
+            _ttsWork = false;
+            EndWork(generation);
         }
     }
 
     private async void SaveAudio_Click(object sender, RoutedEventArgs e)
     {
-        if (_busy)
+        if (_isLive || _busy)
         {
             return;
         }
@@ -843,6 +869,7 @@ public partial class MainWindow : Window
         PersistSettings();
 
         var cts = BeginWork("Preparing neural voice…");
+        var generation = _workGeneration;
         var wavPath = Path.Combine(Path.GetTempPath(), $"speechhandler-tts-{Guid.NewGuid():N}.wav");
         try
         {
@@ -874,7 +901,7 @@ public partial class MainWindow : Window
                 // Best-effort cleanup.
             }
 
-            EndWork();
+            EndWork(generation);
         }
     }
 
@@ -929,10 +956,20 @@ public partial class MainWindow : Window
         _ttsPlayer.Init(_ttsReader);
         _ttsPlaying = true;
         SpeakButton.Content = "Stop speaking";
+        UpdateActionButtons();
         SetStatus("Playing transcript…", LiveBrush);
         _ttsPlayer.Play();
 
-        await using (cancellationToken.Register(StopTtsPlayback))
+        await using (cancellationToken.Register(() =>
+                     {
+                         if (Dispatcher.CheckAccess())
+                         {
+                             StopTtsPlayback();
+                             return;
+                         }
+
+                         Dispatcher.BeginInvoke(StopTtsPlayback);
+                     }))
         {
             await finished.Task;
         }
@@ -942,6 +979,12 @@ public partial class MainWindow : Window
 
     private void StopTtsPlayback()
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(StopTtsPlayback);
+            return;
+        }
+
         _ttsPlaying = false;
         try
         {
@@ -970,13 +1013,68 @@ public partial class MainWindow : Window
             _ttsTempFile = null;
         }
 
-        SpeakButton.Content = "Speak transcript";
+        if (!_ttsWork)
+        {
+            SpeakButton.Content = "Speak transcript";
+        }
+
+        UpdateActionButtons();
     }
 
-    private async void Window_Closed(object? sender, EventArgs e)
+    private async void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_forceClose)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (_closing)
+        {
+            return;
+        }
+
+        _closing = true;
+        App.IsExiting = true;
+        _workCts?.Cancel();
+        StopTtsPlayback();
+        try
+        {
+            var load = _modelLoadTask;
+            if (load is not null)
+            {
+                try
+                {
+                    await load;
+                }
+                catch (Exception)
+                {
+                    // Load was cancelled or failed; continue shutting down.
+                }
+            }
+
+            if (_isLive)
+            {
+                await StopLiveAsync();
+            }
+
+            await WaitForLiveApiTasksAsync();
+        }
+        catch (Exception)
+        {
+            CleanupLive();
+        }
+
+        _forceClose = true;
+        _ = Dispatcher.BeginInvoke(Close, DispatcherPriority.Background);
+    }
+
+    private void Window_Closed(object? sender, EventArgs e)
     {
         _closing = true;
         _inputLevelTimer.Stop();
+        _inputLevelTimer.Tick -= InputLevelTimer_Tick;
+        _vosk.CacheChanged -= Vosk_CacheChanged;
         PersistSettings();
         TranscriptSpelling.Detach();
         _workCts?.Cancel();
@@ -984,9 +1082,17 @@ public partial class MainWindow : Window
         CleanupLive();
         KokoroTtsRuntime.Shared.Dispose();
         _vosk.Dispose();
-        _apiGate.Dispose();
-        await Task.CompletedTask;
+        try
+        {
+            _apiGate.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already released during shutdown.
+        }
     }
+
+    private void Vosk_CacheChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(RefreshCacheUi);
 
     private async Task PrepareLocalModelAsync(CancellationToken cancellationToken)
     {
@@ -1005,12 +1111,18 @@ public partial class MainWindow : Window
         var plan = _vosk.PlanLoad(resolved);
         if (plan.AlreadyLoaded)
         {
-            await Task.Run(() =>
+            await RunModelLoadAsync(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _vosk.EnsureLoaded(resolved);
+                return 0;
             }, cancellationToken);
-            RefreshCacheUi();
+            if (!_closing)
+            {
+                RefreshCacheUi();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
             return;
         }
 
@@ -1021,6 +1133,11 @@ public partial class MainWindow : Window
 
         if (plan.NeedsConfirmation)
         {
+            if (_closing)
+            {
+                throw new OperationCanceledException();
+            }
+
             var confirm = MessageBox.Show(
                 this,
                 plan.ConfirmationMessage,
@@ -1034,11 +1151,26 @@ public partial class MainWindow : Window
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var evicted = await Task.Run(() =>
+        SetModelLoading(true);
+        IReadOnlyList<LoadedVoskModelInfo> evicted;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return _vosk.EnsureLoaded(resolved);
-        }, cancellationToken);
+            evicted = await RunModelLoadAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return _vosk.EnsureLoaded(resolved);
+            }, cancellationToken);
+        }
+        finally
+        {
+            SetModelLoading(false);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_closing)
+        {
+            return;
+        }
 
         RefreshCacheUi();
         if (evicted.Count > 0)
@@ -1049,6 +1181,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task<T> RunModelLoadAsync<T>(Func<T> load, CancellationToken cancellationToken)
+    {
+        var task = Task.Run(load, cancellationToken);
+        _modelLoadTask = task;
+        try
+        {
+            return await task;
+        }
+        finally
+        {
+            if (ReferenceEquals(_modelLoadTask, task))
+            {
+                _modelLoadTask = null;
+            }
+        }
+    }
+
+    private void SetModelLoading(bool loading)
+    {
+        _loadingModel = loading;
+        if (_closing || !IsLoaded)
+        {
+            return;
+        }
+
+        CancelProcessingButton.Visibility = loading ? Visibility.Collapsed : Visibility.Visible;
+        UpdateActionButtons();
+    }
+
     private void ApplyCacheBudget()
     {
         _settings.EnsureCacheBudget();
@@ -1057,6 +1218,11 @@ public partial class MainWindow : Window
 
     private void RefreshCacheUi()
     {
+        if (_closing)
+        {
+            return;
+        }
+
         if (!Dispatcher.CheckAccess())
         {
             Dispatcher.BeginInvoke(RefreshCacheUi);
@@ -1284,17 +1450,34 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
                 if (session.Accept(buffer, read, out var final, out var partial))
                 {
-                    Dispatcher.Invoke(() => AppendFinal(final, formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset));
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (!_closing)
+                        {
+                            AppendFinal(final, formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset);
+                        }
+                    });
                 }
                 else
                 {
-                    Dispatcher.Invoke(() => SetPartial(partial));
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (!_closing)
+                        {
+                            SetPartial(partial);
+                        }
+                    });
                 }
             }
 
             var last = session.Finish();
             Dispatcher.Invoke(() =>
             {
+                if (_closing)
+                {
+                    return;
+                }
+
                 AppendFinal(last, formatAsSentences: true, timeOffsetSeconds: _sessionTimeOffset);
                 PartialText.Text = string.Empty;
             });
@@ -1313,9 +1496,15 @@ public partial class MainWindow : Window
                 WaveFileWriter.CreateWaveFile(temp, converted);
             }, cancellationToken);
 
-            var wavBytes = await File.ReadAllBytesAsync(temp, cancellationToken);
-            var result = await TranscribeCloudAsync(wavBytes, cancellationToken);
-            AppendFinal(result, timeOffsetSeconds: _sessionTimeOffset);
+            if (new FileInfo(temp).Length <= MaxCloudUploadBytes)
+            {
+                var wavBytes = await File.ReadAllBytesAsync(temp, cancellationToken);
+                var result = await TranscribeCloudAsync(wavBytes, cancellationToken);
+                AppendFinal(result, timeOffsetSeconds: _sessionTimeOffset);
+                return;
+            }
+
+            await TranscribeFileApiChunkedAsync(temp, cancellationToken);
         }
         finally
         {
@@ -1327,6 +1516,31 @@ public partial class MainWindow : Window
             {
                 // Temp cleanup is best-effort.
             }
+        }
+    }
+
+    private async Task TranscribeFileApiChunkedAsync(string wavPath, CancellationToken cancellationToken)
+    {
+        using var reader = new WaveFileReader(wavPath);
+        var buffer = new byte[CloudFileChunkPcmBytes];
+        long pcmOffset = 0;
+        var part = 1;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = reader.Read(buffer, 0, buffer.Length);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            ProcessingMessage.Text = $"Transcribing file part {part}…";
+            SetStatus($"Transcribing file part {part}…", ProcessingBrush);
+            var wavBytes = Pcm16kMonoConverter.ToWavBytes(buffer.AsSpan(0, read));
+            var result = await TranscribeCloudAsync(wavBytes, cancellationToken);
+            AppendFinal(result, timeOffsetSeconds: _sessionTimeOffset + PcmDurationSeconds(pcmOffset));
+            pcmOffset += read;
+            part++;
         }
     }
 
@@ -1398,35 +1612,117 @@ public partial class MainWindow : Window
             {
                 var token = _workCts?.Token ?? CancellationToken.None;
                 var offset = _sessionTimeOffset + PcmDurationSeconds(offsetBytes);
-                _ = TranscribeApiChunkAsync(chunk, offset, token);
+                TrackLiveApiTask(TranscribeApiChunkAsync(chunk, offset, token));
             }
         }
         catch (Exception ex)
         {
-            Dispatcher.BeginInvoke(() => ShowError("Live transcription failed.", ex));
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!_closing)
+                {
+                    ShowError("Live transcription failed.", ex);
+                }
+            });
             _ = Dispatcher.BeginInvoke(async () => await StopLiveAsync());
         }
     }
 
     private async Task TranscribeApiChunkAsync(byte[] pcm, double timeOffsetSeconds, CancellationToken cancellationToken)
     {
-        await _apiGate.WaitAsync(cancellationToken);
+        try
+        {
+            await _apiGate.WaitAsync(cancellationToken);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         try
         {
             var result = await TranscribeCloudPcmAsync(pcm, cancellationToken);
-            await Dispatcher.InvokeAsync(() => AppendFinal(result, timeOffsetSeconds: timeOffsetSeconds));
+            if (_closing)
+            {
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!_closing)
+                {
+                    AppendFinal(result, timeOffsetSeconds: timeOffsetSeconds);
+                }
+            });
         }
         catch (OperationCanceledException)
         {
             // Stopping.
         }
+        catch (ObjectDisposedException)
+        {
+            // Shutting down.
+        }
         catch (Exception ex)
         {
-            await Dispatcher.InvokeAsync(() => ShowError("A live API chunk failed.", ex));
+            if (!_closing)
+            {
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (!_closing)
+                    {
+                        ShowError("A live API chunk failed.", ex);
+                    }
+                });
+            }
         }
         finally
         {
-            _apiGate.Release();
+            try
+            {
+                _apiGate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Shutting down.
+            }
+        }
+    }
+
+    private void TrackLiveApiTask(Task task)
+    {
+        lock (_liveSync)
+        {
+            _liveApiTasks.RemoveAll(item => item.IsCompleted);
+            _liveApiTasks.Add(task);
+        }
+    }
+
+    private async Task WaitForLiveApiTasksAsync()
+    {
+        Task[] tasks;
+        lock (_liveSync)
+        {
+            tasks = [.. _liveApiTasks];
+            _liveApiTasks.Clear();
+        }
+
+        if (tasks.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception)
+        {
+            // Individual tasks already surface errors.
         }
     }
 
@@ -1439,6 +1735,11 @@ public partial class MainWindow : Window
 
         Dispatcher.BeginInvoke(() =>
         {
+            if (_closing)
+            {
+                return;
+            }
+
             if (_isLive)
             {
                 ShowError("Audio capture stopped unexpectedly.", error);
@@ -1552,7 +1853,10 @@ public partial class MainWindow : Window
             InputLevelBar.Foreground = ErrorBrush;
             if (!_isLive && !_busy)
             {
-                SetStatus($"Could not open {source.DisplayName}.", ErrorBrush);
+                var detail = string.IsNullOrWhiteSpace(ex.Message)
+                    ? $"Could not open {source.DisplayName}."
+                    : $"Could not open {source.DisplayName}: {ex.Message}";
+                SetStatus(detail, ErrorBrush);
             }
         }
     }
@@ -1651,6 +1955,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource BeginWork(string message, bool determinate = false, bool showOverlay = true)
     {
         _busy = true;
+        _workGeneration++;
         _workCts?.Cancel();
         _workCts = new CancellationTokenSource();
         UpdateActionButtons();
@@ -1660,24 +1965,61 @@ public partial class MainWindow : Window
             ProcessingMessage.Text = message;
             ProcessingBar.IsIndeterminate = !determinate;
             ProcessingBar.Value = 0;
-            ProcessingOverlay.Visibility = Visibility.Visible;
+            ShowProcessingOverlay();
         }
 
+        CancelProcessingButton.IsEnabled = !_loadingModel;
         return _workCts;
     }
 
-    private void EndWork()
+    private void EndWork(int generation)
     {
+        if (generation != _workGeneration)
+        {
+            return;
+        }
+
         _busy = false;
+        _ttsWork = false;
+        _loadingModel = false;
         HideOverlay();
+        SpeakButton.Content = "Speak transcript";
         UpdateActionButtons();
-        PersistSettings();
+        if (!_closing)
+        {
+            PersistSettings();
+        }
     }
 
-    private void HideOverlay() => ProcessingOverlay.Visibility = Visibility.Collapsed;
+    private void ShowProcessingOverlay()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        ProcessingOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void HideOverlay()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        _loadingModel = false;
+        CancelProcessingButton.Visibility = Visibility.Visible;
+        ProcessingOverlay.Visibility = Visibility.Collapsed;
+    }
 
     private void UpdateActionButtons()
     {
+        if (_closing)
+        {
+            return;
+        }
+
         var idle = !_isLive && !_busy;
         SettingsMenuItem.IsEnabled = idle;
         TtsSettingsMenuItem.IsEnabled = idle;
@@ -1687,9 +2029,11 @@ public partial class MainWindow : Window
         RefreshSourcesButton.IsEnabled = idle;
         StartLiveButton.IsEnabled = idle;
         StopLiveButton.IsEnabled = _isLive;
+        CancelProcessingButton.IsEnabled = !_loadingModel && (_busy || _isLive || _ttsPlaying || _ttsWork);
         ChooseFileButton.IsEnabled = idle;
         TranscribeFileButton.IsEnabled = idle && !string.IsNullOrWhiteSpace(_selectedAudioFile);
-        SaveAudioButton.IsEnabled = !_busy;
+        SpeakButton.IsEnabled = idle || _ttsPlaying || _ttsWork;
+        SaveAudioButton.IsEnabled = idle;
     }
 
     private void AppendFinal(TranscriptionResult? result, bool formatAsSentences = false, double timeOffsetSeconds = 0)
@@ -1853,6 +2197,11 @@ public partial class MainWindow : Window
 
     private void ShowError(string title, Exception ex)
     {
+        if (_closing)
+        {
+            return;
+        }
+
         SetStatus(title, ErrorBrush);
         MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }

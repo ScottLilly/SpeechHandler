@@ -75,7 +75,7 @@ internal static class TtsDownloader
         {
             FileName = tarExe,
             RedirectStandardError = true,
-            RedirectStandardOutput = true,
+            RedirectStandardOutput = false,
             UseShellExecute = false,
             CreateNoWindow = true
         };

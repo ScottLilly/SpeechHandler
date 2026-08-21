@@ -9,7 +9,7 @@ internal sealed class ElevenLabsSpeechClient
 {
     private static readonly HttpClient Http = new()
     {
-        Timeout = TimeSpan.FromMinutes(5)
+        Timeout = TimeSpan.FromMinutes(15)
     };
 
     public async Task<TranscriptionResult> TranscribeAsync(

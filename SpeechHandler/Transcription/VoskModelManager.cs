@@ -72,9 +72,29 @@ internal sealed class AppSettings
     public void Save()
     {
         Directory.CreateDirectory(AppStorage.Root);
-        File.WriteAllText(
-            AppStorage.SettingsPath,
-            JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        var tempPath = AppStorage.SettingsPath + ".tmp";
+        File.WriteAllText(tempPath, json);
+        try
+        {
+            File.Move(tempPath, AppStorage.SettingsPath, overwrite: true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch (IOException)
+            {
+                // Leave the temp file if it cannot be removed.
+            }
+
+            throw;
+        }
     }
 }
 

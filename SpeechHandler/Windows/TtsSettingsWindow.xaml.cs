@@ -8,14 +8,19 @@ namespace SpeechHandler;
 internal partial class TtsSettingsWindow : Window
 {
     private readonly AppSettings _settings;
+    private readonly string _originalVoiceId;
+    private readonly double _originalSpeed;
     private bool _suppressEngineSelection;
     private bool _suppressVoiceSelection;
     private bool _downloading;
+    private bool _committed;
     private CancellationTokenSource? _downloadCts;
 
     public TtsSettingsWindow(AppSettings settings)
     {
         _settings = settings;
+        _originalVoiceId = settings.TtsVoiceId;
+        _originalSpeed = settings.TtsSpeed;
         InitializeComponent();
         LoadFromSettings();
     }
@@ -207,16 +212,20 @@ internal partial class TtsSettingsWindow : Window
         }
 
         SaveToSettings();
+        _committed = true;
         DialogResult = true;
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
         _downloadCts?.Cancel();
-        if (!_downloading)
+        if (_committed)
         {
-            SaveToSettings();
+            return;
         }
+
+        _settings.TtsVoiceId = _originalVoiceId;
+        _settings.TtsSpeed = _originalSpeed;
     }
 
     private void SetDownloadUi(bool downloading, string message)
@@ -236,6 +245,7 @@ internal partial class TtsSettingsWindow : Window
         DownloadButton.IsEnabled = !downloading;
         DownloadRecommendedButton.IsEnabled = !downloading;
         CloseButton.IsEnabled = !downloading;
+        CancelDownloadButton.IsEnabled = true;
         CancelDownloadButton.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;
     }
 }

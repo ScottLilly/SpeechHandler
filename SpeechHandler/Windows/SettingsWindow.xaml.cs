@@ -9,9 +9,15 @@ namespace SpeechHandler;
 internal partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
+    private readonly string _originalEngine;
+    private readonly bool _originalTranslateToEnglish;
+    private readonly string _originalWhisperModel;
+    private readonly string _originalElevenLabsModel;
+    private readonly int _originalCacheBudgetGb;
     private bool _suppressLanguageSelection;
     private bool _suppressModelSelection;
     private bool _downloading;
+    private bool _committed;
     private CancellationTokenSource? _downloadCts;
     private string _modelsDirectory = string.Empty;
 
@@ -23,6 +29,11 @@ internal partial class SettingsWindow : Window
         _settings = settings;
         OpenAiKey = openAiKey;
         ElevenLabsKey = elevenLabsKey;
+        _originalEngine = settings.Engine;
+        _originalTranslateToEnglish = settings.TranslateToEnglish;
+        _originalWhisperModel = settings.WhisperModel;
+        _originalElevenLabsModel = settings.ElevenLabsModel;
+        _originalCacheBudgetGb = settings.ModelCacheBudgetGb;
         InitializeComponent();
         DataObject.AddPastingHandler(CacheBudgetBox, CacheBudgetBox_Pasting);
         LoadFromSettings();
@@ -427,16 +438,23 @@ internal partial class SettingsWindow : Window
         }
 
         SaveToSettings();
+        _committed = true;
         DialogResult = true;
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
         _downloadCts?.Cancel();
-        if (!_downloading)
+        if (_committed)
         {
-            SaveToSettings();
+            return;
         }
+
+        _settings.Engine = _originalEngine;
+        _settings.TranslateToEnglish = _originalTranslateToEnglish;
+        _settings.WhisperModel = _originalWhisperModel;
+        _settings.ElevenLabsModel = _originalElevenLabsModel;
+        _settings.ModelCacheBudgetGb = _originalCacheBudgetGb;
     }
 
     private void SetDownloadUi(bool downloading, string message)
@@ -458,6 +476,7 @@ internal partial class SettingsWindow : Window
         VoskLanguageCombo.IsEnabled = !downloading;
         VoskModelCombo.IsEnabled = !downloading;
         CloseButton.IsEnabled = !downloading;
+        CancelDownloadButton.IsEnabled = true;
         CancelDownloadButton.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;
     }
 

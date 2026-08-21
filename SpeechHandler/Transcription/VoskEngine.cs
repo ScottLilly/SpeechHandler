@@ -223,6 +223,20 @@ internal sealed class VoskEngine : IDisposable
 
             lock (_sync)
             {
+                if (_disposed)
+                {
+                    try
+                    {
+                        model.Dispose();
+                    }
+                    catch (Exception)
+                    {
+                        // Native dispose is best-effort.
+                    }
+
+                    return evicted;
+                }
+
                 _entries[fullPath] = new Entry
                 {
                     Path = fullPath,
@@ -236,7 +250,7 @@ internal sealed class VoskEngine : IDisposable
         }
         catch
         {
-            if (retiring.Count > 0)
+            if (retiring.Count > 0 && !_disposed)
             {
                 Notify(changed: true);
             }
@@ -442,10 +456,12 @@ internal sealed class VoskEngine : IDisposable
 
     private void Notify(bool changed)
     {
-        if (changed)
+        if (_disposed || !changed)
         {
-            CacheChanged?.Invoke(this, EventArgs.Empty);
+            return;
         }
+
+        CacheChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private static string BuildConfirmation(
@@ -541,25 +557,32 @@ internal sealed class VoskSession : IDisposable
             return null;
         }
 
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
-        var words = ReadWords(root);
-        if (words.Count > 0)
+        try
         {
-            var fromWords = BuildTextFromWords(words);
-            if (!string.IsNullOrWhiteSpace(fromWords))
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            var words = ReadWords(root);
+            if (words.Count > 0)
             {
-                return new TranscriptionResult(fromWords, words);
+                var fromWords = BuildTextFromWords(words);
+                if (!string.IsNullOrWhiteSpace(fromWords))
+                {
+                    return new TranscriptionResult(fromWords, words);
+                }
             }
-        }
 
-        if (!root.TryGetProperty("text", out var value))
+            if (!root.TryGetProperty("text", out var value))
+            {
+                return null;
+            }
+
+            var text = value.GetString();
+            return string.IsNullOrWhiteSpace(text) ? null : new TranscriptionResult(text.Trim(), words);
+        }
+        catch (JsonException)
         {
             return null;
         }
-
-        var text = value.GetString();
-        return string.IsNullOrWhiteSpace(text) ? null : new TranscriptionResult(text.Trim(), words);
     }
 
     private static List<TimedWord> ReadWords(JsonElement root)
@@ -636,13 +659,20 @@ internal sealed class VoskSession : IDisposable
             return null;
         }
 
-        using var document = JsonDocument.Parse(json);
-        if (!document.RootElement.TryGetProperty(propertyName, out var value))
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty(propertyName, out var value))
+            {
+                return null;
+            }
+
+            var text = value.GetString();
+            return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        }
+        catch (JsonException)
         {
             return null;
         }
-
-        var text = value.GetString();
-        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 }
