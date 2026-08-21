@@ -1091,22 +1091,19 @@ public partial class MainWindow : Window
             }
         }
 
-        RefreshLoadedList();
+        RefreshLoadedList(snapshot);
     }
 
-    private void RefreshLoadedList()
+    private void RefreshLoadedList(IReadOnlyList<LoadedVoskModelInfo> snapshot)
     {
-        var rows = _vosk.Snapshot().Select(ToLoadedRow).ToList();
-        var used = rows.Sum(row => row.PrivateBytes);
-        var budget = _vosk.BudgetBytes;
-        var remaining = Math.Max(0, budget - used);
-        LoadedModelsTotals.Text = rows.Count == 0
-            ? $"{ProcessMemory.FormatBytes(remaining)} free of {ProcessMemory.FormatBytes(budget)}"
-            : $"{ProcessMemory.FormatBytes(used)} used"
-              + (used > budget ? " (over budget)" : $"  ·  {ProcessMemory.FormatBytes(remaining)} free");
+        var rows = snapshot
+            .OrderByDescending(info => info.LastUsedUtc)
+            .Select(ToLoadedRow)
+            .ToList();
         LoadedModelsList.ItemsSource = rows;
-        LoadedModelsEmpty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        LoadedModelsList.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var hasModels = rows.Count > 0;
+        LoadedModelsEmpty.Visibility = hasModels ? Visibility.Collapsed : Visibility.Visible;
+        LoadedModelsScroller.Visibility = hasModels ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static LoadedModelRow ToLoadedRow(LoadedVoskModelInfo info) =>
@@ -1210,32 +1207,6 @@ public partial class MainWindow : Window
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         return brush;
-    }
-
-    private void LoadedModelsButton_Click(object sender, RoutedEventArgs e)
-    {
-        RefreshLoadedList();
-        LoadedModelsPopup.IsOpen = !LoadedModelsPopup.IsOpen;
-    }
-
-    private void Window_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (!LoadedModelsPopup.IsOpen || e.OriginalSource is not DependencyObject node)
-        {
-            return;
-        }
-
-        for (DependencyObject? current = node; current is not null; current = VisualTreeHelper.GetParent(current))
-        {
-            if (ReferenceEquals(current, CachePanel)
-                || ReferenceEquals(current, LoadedModelsButton)
-                || ReferenceEquals(current, LoadedModelsPopup.Child))
-            {
-                return;
-            }
-        }
-
-        LoadedModelsPopup.IsOpen = false;
     }
 
     private void UnloadModel_Click(object sender, RoutedEventArgs e)

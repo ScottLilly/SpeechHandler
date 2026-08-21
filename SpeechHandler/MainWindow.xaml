@@ -8,8 +8,7 @@
         Background="{StaticResource AppBg}"
         Foreground="{StaticResource TextPrimary}"
         TextElement.Foreground="{StaticResource TextPrimary}"
-        Closed="Window_Closed"
-        PreviewMouseDown="Window_PreviewMouseDown">
+        Closed="Window_Closed">
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
@@ -43,7 +42,6 @@
         <Grid Margin="20">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*" MinHeight="420"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -51,117 +49,195 @@
             <Grid Margin="0,0,0,12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <TextBlock FontSize="15" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimary}"
-                           Text="Language" VerticalAlignment="Center" Margin="0,0,12,8"/>
-                <ComboBox x:Name="LanguageCombo" Grid.Column="1" Margin="0,0,0,8"
-                          VerticalAlignment="Center" Width="560" HorizontalAlignment="Left"
-                          SelectionChanged="LanguageCombo_SelectionChanged"/>
-                <TextBlock Grid.Row="1" FontSize="15" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimary}"
-                           Text="Model/Service" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                <ComboBox x:Name="InstalledModelCombo" Grid.Row="1" Grid.Column="1"
-                          VerticalAlignment="Center" Width="560" HorizontalAlignment="Left"
-                          SelectionChanged="InstalledModelCombo_SelectionChanged">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
-                                           Foreground="#3DDC97" FontWeight="SemiBold" Text="In memory">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding InMemory}" Value="True">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Grid>
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
-                <Grid Grid.Column="2" Grid.RowSpan="2" Margin="20,0,0,0">
-                    <Border x:Name="CachePanel"
-                            Style="{StaticResource Card}" Padding="12,10" Margin="0">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="CacheSummaryText"
-                                           Style="{StaticResource MutedText}"
-                                           TextWrapping="Wrap"
-                                           VerticalAlignment="Center"
-                                           Text="No models loaded"/>
-                                <Button x:Name="LoadedModelsButton" Grid.Column="1"
-                                        Style="{StaticResource LinkButton}"
-                                        Content="Details"
-                                        Margin="12,0,0,0"
-                                        VerticalAlignment="Center"
-                                        ToolTip="Show loaded models and memory use"
-                                        Click="LoadedModelsButton_Click"/>
-                            </Grid>
-                            <Border x:Name="CacheBarHost" Grid.Row="1"
-                                    Height="32"
-                                    Margin="0,8,0,0"
-                                    VerticalAlignment="Bottom"
-                                    Background="#1A222B"
-                                    BorderBrush="{StaticResource CardBorder}"
-                                    BorderThickness="1"
-                                    CornerRadius="6"
-                                    ClipToBounds="True"
-                                    ToolTip="Memory reserved for loaded Vosk models">
-                                <Grid x:Name="CacheBarGrid"/>
-                            </Border>
-                        </Grid>
-                    </Border>
-                    <Popup x:Name="LoadedModelsPopup"
-                           PlacementTarget="{Binding ElementName=CachePanel}"
-                           Placement="Bottom"
-                           StaysOpen="True"
-                           AllowsTransparency="True"
-                           HorizontalOffset="0"
-                           VerticalOffset="6">
-                        <Border Background="{StaticResource CardBg}"
+                <Grid x:Name="SourceColumn" HorizontalAlignment="Left">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="560"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock FontSize="15" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimary}"
+                               Text="Language" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                    <ComboBox x:Name="LanguageCombo" Grid.Column="1" Margin="0,0,0,8"
+                              VerticalAlignment="Center" HorizontalAlignment="Stretch"
+                              SelectionChanged="LanguageCombo_SelectionChanged"/>
+                    <TextBlock Grid.Row="1" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimary}"
+                               Text="Model/Service" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                    <ComboBox x:Name="InstalledModelCombo" Grid.Row="1" Grid.Column="1"
+                              VerticalAlignment="Center" HorizontalAlignment="Stretch" Margin="0,0,0,8"
+                              SelectionChanged="InstalledModelCombo_SelectionChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
+                                               Foreground="#3DDC97" FontWeight="SemiBold" Text="In memory">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding InMemory}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TabControl Grid.Row="2" Grid.ColumnSpan="2"
+                                Style="{StaticResource SourceTabControl}"
+                                ItemContainerStyle="{StaticResource SourceTabItem}">
+                        <TabItem>
+                            <TabItem.Header>
+                                <TextBlock Text="Audio file" TextWrapping="Wrap" TextAlignment="Center"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
+                            </TabItem.Header>
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
+                                           FontSize="13" Foreground="{StaticResource TextPrimary}"
+                                           Text="Choose a recording, then transcribe it."/>
+                                <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="ChooseFileButton" Style="{StaticResource SecondaryButton}"
+                                            Content="Choose file…" HorizontalAlignment="Stretch"
+                                            Click="ChooseFile_Click"/>
+                                    <Button x:Name="TranscribeFileButton" Grid.Column="2" Style="{StaticResource PrimaryButton}"
+                                            Content="Transcribe" HorizontalAlignment="Stretch"
+                                            IsEnabled="False" Click="TranscribeFile_Click"/>
+                                </Grid>
+                                <TextBlock x:Name="FilePlaceholder" Style="{StaticResource MutedText}"
+                                           TextWrapping="Wrap" VerticalAlignment="Center"
+                                           Text="No file selected. Name, length, size, and format will appear here."/>
+                                <Grid x:Name="FileDetailsPanel" Visibility="Collapsed" VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Style="{StaticResource MutedText}" Text="Name"/>
+                                    <TextBlock x:Name="SelectedFileName" Grid.Column="1" Margin="12,0,0,6"
+                                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" Text="Length"/>
+                                    <TextBlock x:Name="SelectedFileDuration" Grid.Row="1" Grid.Column="1"
+                                               Margin="12,0,0,6" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Row="2" Style="{StaticResource MutedText}" Text="Size"/>
+                                    <TextBlock x:Name="SelectedFileSize" Grid.Row="2" Grid.Column="1"
+                                               Margin="12,0,0,6" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Row="3" Style="{StaticResource MutedText}" Text="Format"/>
+                                    <TextBlock x:Name="SelectedFileFormat" Grid.Row="3" Grid.Column="1"
+                                               Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
+                                </Grid>
+                            </DockPanel>
+                        </TabItem>
+                        <TabItem>
+                            <TabItem.Header>
+                                <TextBlock Text="Live transcription" TextWrapping="Wrap" TextAlignment="Center"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
+                            </TabItem.Header>
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
+                                           FontSize="13" Foreground="{StaticResource TextPrimary}"
+                                           Text="Capture from a microphone or from system audio."/>
+                                <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="StartLiveButton" Style="{StaticResource PrimaryButton}"
+                                            Content="Start" HorizontalAlignment="Stretch"
+                                            Click="StartLive_Click"/>
+                                    <Button x:Name="StopLiveButton" Grid.Column="2" Style="{StaticResource DangerButton}"
+                                            Content="Stop" HorizontalAlignment="Stretch"
+                                            IsEnabled="False" Click="StopLive_Click"/>
+                                </Grid>
+                                <StackPanel VerticalAlignment="Center">
+                                    <Label Content="Input source" Padding="0,0,0,6" HorizontalAlignment="Left"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox x:Name="SourcesCombo" DisplayMemberPath="DisplayName"/>
+                                        <Button x:Name="RefreshSourcesButton" Grid.Column="1"
+                                                Style="{StaticResource SecondaryButton}" Content="Refresh"
+                                                MinWidth="80" Padding="10,4" Margin="8,0,0,0"
+                                                Click="RefreshSources_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                            </DockPanel>
+                        </TabItem>
+                    </TabControl>
+                </Grid>
+
+                <Border x:Name="CachePanel" Grid.Column="1"
+                        Style="{StaticResource Card}" Padding="12,10" Margin="20,0,0,0"
+                        VerticalAlignment="Top"
+                        Height="{Binding ActualHeight, ElementName=SourceColumn}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="CacheSummaryText"
+                                   Style="{StaticResource MutedText}"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center"
+                                   Text="No models loaded"/>
+                        <Border x:Name="CacheBarHost" Grid.Row="1"
+                                Height="32"
+                                Margin="0,8,0,0"
+                                Background="#1A222B"
                                 BorderBrush="{StaticResource CardBorder}"
                                 BorderThickness="1"
-                                CornerRadius="8"
-                                Padding="14"
-                                Width="420">
-                            <DockPanel>
-                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                                    <TextBlock FontWeight="SemiBold" Text="Loaded models"/>
-                                    <TextBlock x:Name="LoadedModelsTotals"
-                                               Style="{StaticResource MutedText}"
-                                               Margin="0,6,0,0"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                                <TextBlock x:Name="LoadedModelsEmpty"
-                                           DockPanel.Dock="Top"
-                                           Style="{StaticResource MutedText}"
-                                           TextWrapping="Wrap"
-                                           Text="No Vosk models are in memory yet. After you transcribe, they stay loaded so you can switch without waiting."/>
+                                CornerRadius="6"
+                                ClipToBounds="True"
+                                ToolTip="Memory reserved for loaded Vosk models">
+                            <Grid x:Name="CacheBarGrid"/>
+                        </Border>
+                        <Grid Grid.Row="2" Margin="0,10,0,0">
+                            <TextBlock x:Name="LoadedModelsEmpty"
+                                       Style="{StaticResource MutedText}"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Top"
+                                       Text="No Vosk models are in memory yet. After you transcribe, they stay loaded so you can switch without waiting."/>
+                            <ScrollViewer x:Name="LoadedModelsScroller"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <ScrollViewer.Style>
+                                    <Style TargetType="ScrollViewer">
+                                        <Style.Triggers>
+                                            <Trigger Property="ComputedVerticalScrollBarVisibility" Value="Visible">
+                                                <Setter Property="Padding" Value="0,0,12,0"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ScrollViewer.Style>
                                 <ItemsControl x:Name="LoadedModelsList">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
@@ -173,7 +249,7 @@
                                                         <ColumnDefinition Width="*"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <StackPanel>
+                                                    <StackPanel Margin="0,0,8,0">
                                                         <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
                                                                    FontWeight="SemiBold"/>
                                                         <TextBlock Style="{StaticResource MutedText}" Margin="0,2,0,0">
@@ -187,7 +263,6 @@
                                                             Content="Unload"
                                                             MinWidth="80"
                                                             Padding="10,4"
-                                                            Margin="8,0,0,0"
                                                             VerticalAlignment="Center"
                                                             Tag="{Binding ModelPath}"
                                                             IsEnabled="{Binding CanUnload}"
@@ -197,106 +272,13 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                            </DockPanel>
-                        </Border>
-                    </Popup>
-                </Grid>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </Border>
             </Grid>
 
-            <TabControl Grid.Row="1" Margin="0,0,0,12" Style="{StaticResource SourceTabControl}"
-                        ItemContainerStyle="{StaticResource SourceTabItem}">
-                <TabItem>
-                    <TabItem.Header>
-                        <TextBlock Text="Audio file" TextWrapping="Wrap" TextAlignment="Center"
-                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
-                    </TabItem.Header>
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
-                                   FontSize="13" Foreground="{StaticResource TextPrimary}"
-                                   Text="Choose a recording, then transcribe it."/>
-                        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="ChooseFileButton" Style="{StaticResource SecondaryButton}"
-                                    Content="Choose file…" HorizontalAlignment="Stretch"
-                                    Click="ChooseFile_Click"/>
-                            <Button x:Name="TranscribeFileButton" Grid.Column="2" Style="{StaticResource PrimaryButton}"
-                                    Content="Transcribe" HorizontalAlignment="Stretch"
-                                    IsEnabled="False" Click="TranscribeFile_Click"/>
-                        </Grid>
-                        <TextBlock x:Name="FilePlaceholder" Style="{StaticResource MutedText}"
-                                   TextWrapping="Wrap" VerticalAlignment="Center"
-                                   Text="No file selected. Name, length, size, and format will appear here."/>
-                        <Grid x:Name="FileDetailsPanel" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Style="{StaticResource MutedText}" Text="Name"/>
-                            <TextBlock x:Name="SelectedFileName" Grid.Column="1" Margin="12,0,0,6"
-                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" Text="Length"/>
-                            <TextBlock x:Name="SelectedFileDuration" Grid.Row="1" Grid.Column="1"
-                                       Margin="12,0,0,6" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Grid.Row="2" Style="{StaticResource MutedText}" Text="Size"/>
-                            <TextBlock x:Name="SelectedFileSize" Grid.Row="2" Grid.Column="1"
-                                       Margin="12,0,0,6" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Grid.Row="3" Style="{StaticResource MutedText}" Text="Format"/>
-                            <TextBlock x:Name="SelectedFileFormat" Grid.Row="3" Grid.Column="1"
-                                       Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
-                        </Grid>
-                    </DockPanel>
-                </TabItem>
-                <TabItem>
-                    <TabItem.Header>
-                        <TextBlock Text="Live transcription" TextWrapping="Wrap" TextAlignment="Center"
-                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
-                    </TabItem.Header>
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
-                                   FontSize="13" Foreground="{StaticResource TextPrimary}"
-                                   Text="Capture from a microphone or from system audio."/>
-                        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="StartLiveButton" Style="{StaticResource PrimaryButton}"
-                                    Content="Start" HorizontalAlignment="Stretch"
-                                    Click="StartLive_Click"/>
-                            <Button x:Name="StopLiveButton" Grid.Column="2" Style="{StaticResource DangerButton}"
-                                    Content="Stop" HorizontalAlignment="Stretch"
-                                    IsEnabled="False" Click="StopLive_Click"/>
-                        </Grid>
-                        <StackPanel VerticalAlignment="Center">
-                            <Label Content="Input source" Padding="0,0,0,6" HorizontalAlignment="Left"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <ComboBox x:Name="SourcesCombo" DisplayMemberPath="DisplayName"/>
-                                <Button x:Name="RefreshSourcesButton" Grid.Column="1"
-                                        Style="{StaticResource SecondaryButton}" Content="Refresh"
-                                        MinWidth="80" Padding="10,4" Margin="8,0,0,0"
-                                        Click="RefreshSources_Click"/>
-                            </Grid>
-                        </StackPanel>
-                    </DockPanel>
-                </TabItem>
-            </TabControl>
-
-            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,12">
+            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12">
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                         <Ellipse x:Name="StatusDot" Width="10" Height="10" Fill="#6B7682" Margin="0,0,8,0"
@@ -340,7 +322,7 @@
                 </DockPanel>
             </Border>
 
-            <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0">
+            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                         <ComboBox x:Name="TtsVoiceCombo" Width="320" VerticalAlignment="Center"
