@@ -1,0 +1,105 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without a leading v (for example 1.0.1). Leave blank to use the project Version."
+        required: false
+        type: string
+      draft:
+        description: "Create the GitHub release as a draft"
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark the GitHub release as a pre-release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Publish win-x64 package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.version }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = (dotnet msbuild SpeechHandler/SpeechHandler.csproj -getProperty:Version -nologo).Trim()
+          }
+
+          $version = $version.TrimStart("v", "V")
+          if ($version -notmatch '^\d+\.\d+\.\d+') {
+            throw "Version must look like 1.0.0 (got '$version')."
+          }
+
+          $tag = "v$version"
+          Write-Host "Using version $version (tag $tag)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "tag=$tag"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "zip=SpeechHandler-win-x64-$tag.zip"
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          dotnet publish SpeechHandler/SpeechHandler.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -o publish `
+            -p:Version=${{ steps.version.outputs.version }} `
+            -p:DebugType=None `
+            -p:DebugSymbols=false
+
+      - name: Create zip package
+        shell: pwsh
+        run: |
+          $zipName = "${{ steps.version.outputs.zip }}"
+          Compress-Archive -Path "publish\*" -DestinationPath $zipName -Force
+          Get-Item $zipName | Select-Object Name, Length, LastWriteTime
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.zip }}
+          path: ${{ steps.version.outputs.zip }}
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $ghArgs = @(
+            "release", "create", "${{ steps.version.outputs.tag }}",
+            "${{ steps.version.outputs.zip }}",
+            "--title", "Speech Handler ${{ steps.version.outputs.version }}",
+            "--generate-notes",
+            "--target", $env:GITHUB_SHA
+          )
+
+          if ("${{ inputs.draft }}" -eq "true") {
+            $ghArgs += "--draft"
+          }
+
+          if ("${{ inputs.prerelease }}" -eq "true") {
+            $ghArgs += "--prerelease"
+          }
+
+          gh @ghArgs
