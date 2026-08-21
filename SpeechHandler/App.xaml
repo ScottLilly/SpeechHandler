@@ -33,6 +33,7 @@
             <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Icon" Value="pack://application:,,,/Assets/app-icon.png"/>
         </Style>
 
         <Style TargetType="Menu">

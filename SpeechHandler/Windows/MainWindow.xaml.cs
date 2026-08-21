@@ -52,6 +52,7 @@ public partial class MainWindow : Window
     private AudioFileReader? _ttsReader;
     private string? _ttsTempFile;
     private readonly DispatcherTimer _inputLevelTimer;
+    private readonly Dictionary<string, int> _cacheSliceColorByPath = new(StringComparer.OrdinalIgnoreCase);
     private string? _monitorSourceId;
     private float _capturePeak;
     private float _devicePeak;
@@ -1356,14 +1357,15 @@ public partial class MainWindow : Window
             scale = 1;
         }
 
+        SyncCacheSliceColors(snapshot);
+
         var column = 0;
-        for (var i = 0; i < snapshot.Count; i++)
+        foreach (var model in snapshot)
         {
-            var model = snapshot[i];
             AddCacheSlice(
                 column++,
                 Math.Max(1, model.PrivateBytes),
-                SliceBrush(i),
+                SliceBrush(_cacheSliceColorByPath[model.Path]),
                 $"{model.DisplayName} · {ProcessMemory.FormatBytes(model.PrivateBytes)}");
         }
 
@@ -1393,6 +1395,38 @@ public partial class MainWindow : Window
         };
         Grid.SetColumn(slice, column);
         CacheBarGrid.Children.Add(slice);
+    }
+
+    private void SyncCacheSliceColors(IReadOnlyList<LoadedVoskModelInfo> snapshot)
+    {
+        var loaded = new HashSet<string>(snapshot.Select(model => model.Path), StringComparer.OrdinalIgnoreCase);
+        foreach (var path in _cacheSliceColorByPath.Keys.Where(path => !loaded.Contains(path)).ToList())
+        {
+            _cacheSliceColorByPath.Remove(path);
+        }
+
+        var used = new HashSet<int>(_cacheSliceColorByPath.Values);
+        foreach (var model in snapshot)
+        {
+            if (_cacheSliceColorByPath.ContainsKey(model.Path))
+            {
+                continue;
+            }
+
+            var index = 0;
+            while (used.Contains(index) && index < CacheSliceColors.Length)
+            {
+                index++;
+            }
+
+            if (index >= CacheSliceColors.Length)
+            {
+                index = used.Count % CacheSliceColors.Length;
+            }
+
+            _cacheSliceColorByPath[model.Path] = index;
+            used.Add(index);
+        }
     }
 
     private static SolidColorBrush SliceBrush(int index)

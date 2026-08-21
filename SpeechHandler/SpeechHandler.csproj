@@ -9,10 +9,10 @@
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Product>Speech Handler</Product>
     <Description>Transcribe live audio and files with a local Vosk model or a cloud speech API.</Description>
-    <ApplicationIcon />
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Native binaries (x64). The package targets also copy these; this keeps output self-contained. -->
@@ -27,6 +27,10 @@
       <Link>%(Filename)%(Extension)</Link>
       <Visible>false</Visible>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app-icon.png" />
   </ItemGroup>
 
   <ItemGroup>
