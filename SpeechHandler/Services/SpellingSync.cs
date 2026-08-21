@@ -1,6 +1,6 @@
 using SpeechHandler.Transcription;
 
-namespace SpeechHandler;
+namespace SpeechHandler.Services;
 
 internal static class SpellingSync
 {

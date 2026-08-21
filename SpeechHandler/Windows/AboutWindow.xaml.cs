@@ -9,7 +9,7 @@ internal partial class AboutWindow : Window
     {
         InitializeComponent();
         var version = Assembly.GetExecutingAssembly().GetName().Version;
-        VersionText.Text = $"Version {(version is null ? "1.0.0" : version.ToString(3))}";
+        VersionText.Text = $"Version {(version is null ? "1.0.1" : version.ToString(3))}";
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e) => Close();

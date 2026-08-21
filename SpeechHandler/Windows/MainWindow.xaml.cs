@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using NAudio.Wave;
 using SpeechHandler.Audio;
+using SpeechHandler.Services;
 using SpeechHandler.Transcription;
 using SpeechHandler.Tts;
 

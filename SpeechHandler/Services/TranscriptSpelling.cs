@@ -6,7 +6,7 @@ using System.Windows.Input;
 using System.Windows.Markup;
 using SpeechHandler.Transcription;
 
-namespace SpeechHandler;
+namespace SpeechHandler.Services;
 
 internal static class TranscriptSpelling
 {
