@@ -48,3 +48,8 @@ C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.deps.jso
 C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.runtimeconfig.json
 C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.dll
 C:\Users\scott\AppData\Local\Temp\SpeechHandlerBuildCheck\SpeechHandler.pdb
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\TtsSettingsWindow.baml
+D:\Development\Percogna\SpeechHandler\SpeechHandler\obj\Debug\net10.0-windows\TtsSettingsWindow.g.cs
+D:\Development\Percogna\SpeechHandler\SpeechHandler\bin\Debug\net10.0-windows\sherpa-onnx.dll
+D:\Development\Percogna\SpeechHandler\SpeechHandler\bin\Debug\net10.0-windows\onnxruntime.dll
+D:\Development\Percogna\SpeechHandler\SpeechHandler\bin\Debug\net10.0-windows\sherpa-onnx-c-api.dll

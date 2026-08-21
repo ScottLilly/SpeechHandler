@@ -53,6 +53,7 @@ public partial class MainWindow : Window
     private string _elevenLabsKey = string.Empty;
     private bool _suppressLanguageSelection;
     private bool _suppressInstalledModelSelection;
+    private bool _suppressTtsVoiceSelection;
     private readonly List<TimedWord> _timedWords = [];
     private double _sessionTimeOffset;
     private long _liveApiPcmBytes;
@@ -66,7 +67,6 @@ public partial class MainWindow : Window
         TranscriptSpelling.Attach(TranscriptBox);
         TranscriptSpelling.Attach(SrtBox, skipSrtMetadata: true);
         TranscriptSpelling.WordCorrected = SyncSpellingCorrection;
-        TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
         _vosk.CacheChanged += (_, _) => Dispatcher.BeginInvoke(RefreshCacheUi);
         LoadSettingsIntoUi();
 
@@ -96,8 +96,7 @@ public partial class MainWindow : Window
 
     private void LoadSettingsIntoUi()
     {
-        TtsVoiceCombo.SelectedItem = TtsVoiceCatalog.Voices.FirstOrDefault(v => v.Id == _settings.TtsVoiceId)
-                                     ?? TtsVoiceCatalog.Voices[0];
+        LoadTtsVoiceCombo();
         var settingsChanged = VoskModelManager.EnsurePaths(_settings);
         settingsChanged |= _settings.EnsureCacheBudget();
         if (settingsChanged)
@@ -110,9 +109,56 @@ public partial class MainWindow : Window
 
     private void PersistSettings()
     {
-        _settings.TtsVoiceId = (TtsVoiceCombo.SelectedItem as TtsVoiceOption)?.Id ?? "lessac";
+        _settings.TtsVoiceId = (TtsVoiceCombo.SelectedItem as TtsVoiceOption)?.Id ?? TtsVoiceCatalog.DefaultVoiceId;
+        _settings.TtsAudioFormat = AudioFormatWriter.DefaultExtension(_settings.TtsAudioFormat).TrimStart('.');
         _settings.EnsureCacheBudget();
         _settings.Save();
+    }
+
+    private void ApplyAudioSaveDirectory(SaveFileDialog dialog)
+    {
+        dialog.RestoreDirectory = true;
+        var directory = _settings.TtsAudioDirectory;
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var full = Path.GetFullPath(directory);
+            if (!Directory.Exists(full))
+            {
+                return;
+            }
+
+            dialog.InitialDirectory = full;
+            var fileName = Path.GetFileName(dialog.FileName);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                dialog.FileName = Path.Combine(full, fileName);
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore a missing drive or an invalid saved path.
+        }
+    }
+
+    private void RememberAudioSaveDirectory(string filePath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                _settings.TtsAudioDirectory = directory;
+            }
+        }
+        catch (Exception)
+        {
+            // Keep the previously stored folder if this path can't be used.
+        }
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -129,6 +175,50 @@ public partial class MainWindow : Window
         ApplyCacheBudget();
         RefreshEngineSelector();
         RefreshCacheUi();
+    }
+
+    private void TtsSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isLive || _busy)
+        {
+            return;
+        }
+
+        var dialog = new TtsSettingsWindow(_settings) { Owner = this };
+        dialog.ShowDialog();
+        LoadTtsVoiceCombo();
+    }
+
+    private void LoadTtsVoiceCombo()
+    {
+        _suppressTtsVoiceSelection = true;
+        try
+        {
+            TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
+            TtsVoiceCombo.SelectedItem = TtsVoiceCatalog.FindVoice(_settings.TtsVoiceId)
+                                         ?? TtsVoiceCatalog.FindVoice(TtsVoiceCatalog.DefaultVoiceId)
+                                         ?? TtsVoiceCatalog.Voices[0];
+        }
+        finally
+        {
+            _suppressTtsVoiceSelection = false;
+        }
+    }
+
+    private void TtsVoiceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _suppressTtsVoiceSelection || TtsVoiceCombo.SelectedItem is not TtsVoiceOption voice)
+        {
+            return;
+        }
+
+        if (string.Equals(_settings.TtsVoiceId, voice.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _settings.TtsVoiceId = voice.Id;
+        _settings.Save();
     }
 
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
@@ -641,18 +731,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var text = TranscriptBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(text))
+        if (!TryGetTranscriptAndVoice(out var text, out var voice))
         {
-            MessageBox.Show(this, "There is no transcript to speak yet.", "Speech Handler",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        if (TtsVoiceCombo.SelectedItem is not TtsVoiceOption voice)
-        {
-            MessageBox.Show(this, "Select a voice first.", "Speech Handler",
-                MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -661,18 +741,7 @@ public partial class MainWindow : Window
         SpeakButton.Content = "Stop speaking";
         try
         {
-            var status = new Progress<string>(message =>
-            {
-                ProcessingMessage.Text = message;
-                SetStatus(message, ProcessingBrush);
-            });
-
-            await voice.Engine.EnsureReadyAsync(status, cts.Token);
-            ProcessingMessage.Text = "Generating speech…";
-            SetStatus("Generating speech…", ProcessingBrush);
-
-            var wavPath = Path.Combine(Path.GetTempPath(), $"speechhandler-tts-{Guid.NewGuid():N}.wav");
-            await voice.Engine.SynthesizeWavFileAsync(text, wavPath, cts.Token);
+            var wavPath = await SynthesizeTranscriptWavAsync(text, voice, cts.Token);
             HideOverlay();
             _busy = false;
             await PlayTtsAsync(wavPath, cts.Token);
@@ -703,6 +772,124 @@ public partial class MainWindow : Window
                 UpdateActionButtons();
             }
         }
+    }
+
+    private async void SaveAudio_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        if (_ttsPlaying)
+        {
+            StopTtsPlayback();
+        }
+
+        if (!TryGetTranscriptAndVoice(out var text, out var voice))
+        {
+            return;
+        }
+
+        var extension = AudioFormatWriter.DefaultExtension(_settings.TtsAudioFormat);
+        var baseName = !string.IsNullOrWhiteSpace(_selectedAudioFile)
+            ? Path.GetFileNameWithoutExtension(_selectedAudioFile)
+            : $"transcript-{DateTime.Now:yyyyMMdd-HHmmss}";
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save transcript audio",
+            Filter = AudioFormatWriter.FileDialogFilter,
+            FilterIndex = AudioFormatWriter.FilterIndexForExtension(extension),
+            DefaultExt = extension.TrimStart('.'),
+            FileName = $"{baseName}{extension}",
+            AddExtension = true
+        };
+        ApplyAudioSaveDirectory(dialog);
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        _settings.TtsAudioFormat = AudioFormatWriter.DefaultExtension(Path.GetExtension(dialog.FileName))
+            .TrimStart('.');
+        RememberAudioSaveDirectory(dialog.FileName);
+        PersistSettings();
+
+        var cts = BeginWork("Preparing neural voice…");
+        var wavPath = Path.Combine(Path.GetTempPath(), $"speechhandler-tts-{Guid.NewGuid():N}.wav");
+        try
+        {
+            await SynthesizeTranscriptWavAsync(text, voice, cts.Token, wavPath);
+            ProcessingMessage.Text = "Writing audio file…";
+            SetStatus("Writing audio file…", ProcessingBrush);
+            await Task.Run(() => AudioFormatWriter.WriteFromWav(wavPath, dialog.FileName), cts.Token);
+            SetStatus("Saved audio.", IdleBrush);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Audio export canceled.", IdleBrush);
+        }
+        catch (Exception ex)
+        {
+            ShowError("Could not save the audio file.", ex);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(wavPath))
+                {
+                    File.Delete(wavPath);
+                }
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup.
+            }
+
+            EndWork();
+        }
+    }
+
+    private bool TryGetTranscriptAndVoice(out string text, out TtsVoiceOption voice)
+    {
+        text = TranscriptBox.Text.Trim();
+        voice = TtsVoiceCombo.SelectedItem as TtsVoiceOption
+                ?? TtsVoiceCatalog.FindVoice(_settings.TtsVoiceId)
+                ?? TtsVoiceCatalog.FindVoice(TtsVoiceCatalog.DefaultVoiceId)
+                ?? TtsVoiceCatalog.Voices[0];
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            MessageBox.Show(this, "There is no transcript yet.", "Speech Handler",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task<string> SynthesizeTranscriptWavAsync(
+        string text,
+        TtsVoiceOption voice,
+        CancellationToken cancellationToken,
+        string? wavPath = null)
+    {
+        var status = new Progress<string>(message =>
+        {
+            ProcessingMessage.Text = message;
+            SetStatus(message, ProcessingBrush);
+        });
+
+        await voice.Engine.EnsureReadyAsync(status, cancellationToken);
+        ProcessingMessage.Text = "Generating speech…";
+        SetStatus("Generating speech…", ProcessingBrush);
+
+        wavPath ??= Path.Combine(Path.GetTempPath(), $"speechhandler-tts-{Guid.NewGuid():N}.wav");
+        var speed = (float)(_settings.TtsSpeed <= 0 ? 1.0 : _settings.TtsSpeed);
+        await voice.Engine.SynthesizeWavFileAsync(text, wavPath, speed, cancellationToken);
+        return wavPath;
     }
 
     private async Task PlayTtsAsync(string wavPath, CancellationToken cancellationToken)
@@ -767,6 +954,7 @@ public partial class MainWindow : Window
         _workCts?.Cancel();
         StopTtsPlayback();
         CleanupLive();
+        KokoroTtsRuntime.Shared.Dispose();
         _vosk.Dispose();
         _apiGate.Dispose();
         await Task.CompletedTask;
@@ -777,11 +965,11 @@ public partial class MainWindow : Window
         var path = _settings.ModelPath?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new InvalidOperationException("Choose File → Settings and download or browse to a Vosk model folder first.");
+            throw new InvalidOperationException("Choose File → Transcription settings and download or browse to a Vosk model folder first.");
         }
 
         var resolved = VoskModelManager.FindModelFolder(path)
-                       ?? throw new InvalidOperationException("The selected path is not a valid Vosk model folder. Update it in File → Settings.");
+                       ?? throw new InvalidOperationException("The selected path is not a valid Vosk model folder. Update it in File → Transcription settings.");
         _settings.ModelPath = resolved;
         _settings.Save();
         ApplyCacheBudget();
@@ -1314,6 +1502,7 @@ public partial class MainWindow : Window
     {
         var idle = !_isLive && !_busy;
         SettingsMenuItem.IsEnabled = idle;
+        TtsSettingsMenuItem.IsEnabled = idle;
         LanguageCombo.IsEnabled = idle;
         InstalledModelCombo.IsEnabled = idle;
         SourcesCombo.IsEnabled = idle;
@@ -1322,6 +1511,7 @@ public partial class MainWindow : Window
         StopLiveButton.IsEnabled = _isLive;
         ChooseFileButton.IsEnabled = idle;
         TranscribeFileButton.IsEnabled = idle && !string.IsNullOrWhiteSpace(_selectedAudioFile);
+        SaveAudioButton.IsEnabled = !_busy;
     }
 
     private void AppendFinal(TranscriptionResult? result, bool formatAsSentences = false, double timeOffsetSeconds = 0)
@@ -1419,7 +1609,7 @@ public partial class MainWindow : Window
         {
             if (string.IsNullOrWhiteSpace(_elevenLabsKey))
             {
-                throw new InvalidOperationException("Enter an ElevenLabs API key in File → Settings, or set the ELEVENLABS_API_KEY environment variable.");
+                throw new InvalidOperationException("Enter an ElevenLabs API key in File → Transcription settings, or set the ELEVENLABS_API_KEY environment variable.");
             }
 
             return;
@@ -1427,7 +1617,7 @@ public partial class MainWindow : Window
 
         if (string.IsNullOrWhiteSpace(_apiKey))
         {
-            throw new InvalidOperationException("Enter an OpenAI API key in File → Settings, or set the OPENAI_API_KEY environment variable.");
+            throw new InvalidOperationException("Enter an OpenAI API key in File → Transcription settings, or set the OPENAI_API_KEY environment variable.");
         }
     }
 

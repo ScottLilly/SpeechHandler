@@ -32,7 +32,10 @@ internal sealed class AppSettings
     public string WhisperModel { get; set; } = "whisper-1";
     public string ElevenLabsModel { get; set; } = "scribe_v2";
     public bool TranslateToEnglish { get; set; }
-    public string TtsVoiceId { get; set; } = "lessac";
+    public string TtsVoiceId { get; set; } = "kokoro-af_bella";
+    public double TtsSpeed { get; set; } = 1.0;
+    public string TtsAudioFormat { get; set; } = "wav";
+    public string? TtsAudioDirectory { get; set; }
 
     /// <summary>
     /// Whole gigabytes reserved for cached Vosk models. 0 means not chosen yet (use the suggested value).

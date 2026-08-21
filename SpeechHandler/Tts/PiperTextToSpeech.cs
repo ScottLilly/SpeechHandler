@@ -1,44 +1,13 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
-using System.Net.Http;
 using System.Text;
+using SpeechHandler.Transcription;
 
 namespace SpeechHandler.Tts;
 
 /// <summary>
-/// A playable voice. Cloned / speaker-tuned voices can be added later
-/// as additional options that implement <see cref="ITextToSpeechEngine"/>.
-/// </summary>
-internal sealed record TtsVoiceOption(string Id, string DisplayName, ITextToSpeechEngine Engine)
-{
-    public override string ToString() => DisplayName;
-}
-
-internal interface ITextToSpeechEngine
-{
-    Task EnsureReadyAsync(IProgress<string>? status, CancellationToken cancellationToken);
-
-    Task SynthesizeWavFileAsync(string text, string wavPath, CancellationToken cancellationToken);
-}
-
-internal static class TtsVoiceCatalog
-{
-    public static IReadOnlyList<TtsVoiceOption> Voices { get; } =
-    [
-        new("lessac", "Lessac (US English, neural)", new PiperTtsEngine(
-            "en_US-lessac-medium",
-            "en/en_US/lessac/medium/en_US-lessac-medium")),
-        new("amy", "Amy (US English, neural)", new PiperTtsEngine(
-            "en_US-amy-medium",
-            "en/en_US/amy/medium/en_US-amy-medium")),
-        new("ryan", "Ryan (US English, neural)", new PiperTtsEngine(
-            "en_US-ryan-medium",
-            "en/en_US/ryan/medium/en_US-ryan-medium"))
-    ];
-}
-
-/// <summary>
-/// Offline neural TTS via Piper. Much more natural than Windows SAPI voices.
+/// Offline neural TTS via Piper. Smaller and faster than Kokoro, with a more synthetic sound.
 /// </summary>
 internal sealed class PiperTtsEngine : ITextToSpeechEngine
 {
@@ -56,34 +25,48 @@ internal sealed class PiperTtsEngine : ITextToSpeechEngine
         _repoPath = repoPath;
     }
 
-    public async Task EnsureReadyAsync(IProgress<string>? status, CancellationToken cancellationToken)
-    {
-        Directory.CreateDirectory(Transcription.AppStorage.Root);
-        Directory.CreateDirectory(Transcription.AppStorage.TtsVoicesDirectory);
+    public bool IsInstalled() => File.Exists(VoiceOnnxPath()) && File.Exists(VoiceJsonPath());
 
-        var piperExe = Path.Combine(Transcription.AppStorage.PiperDirectory, "piper.exe");
+    public async Task EnsureReadyAsync(IProgress<string>? status, CancellationToken cancellationToken) =>
+        await DownloadAsync(progress: null, status, cancellationToken).ConfigureAwait(false);
+
+    public async Task DownloadAsync(
+        IProgress<double>? progress,
+        IProgress<string>? status,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(AppStorage.Root);
+        Directory.CreateDirectory(AppStorage.TtsVoicesDirectory);
+
+        var piperExe = Path.Combine(AppStorage.PiperDirectory, "piper.exe");
         if (!File.Exists(piperExe))
         {
             status?.Report("Downloading Piper neural TTS…");
             await DownloadAndExtractPiperAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var onnx = VoiceOnnxPath();
-        var json = VoiceJsonPath();
-        if (!File.Exists(onnx) || !File.Exists(json))
+        if (!IsInstalled())
         {
             status?.Report($"Downloading {_fileStem} voice…");
-            await DownloadVoiceAsync(cancellationToken).ConfigureAwait(false);
+            await DownloadVoiceAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            progress?.Report(100);
         }
     }
 
-    public async Task SynthesizeWavFileAsync(string text, string wavPath, CancellationToken cancellationToken)
+    public async Task SynthesizeWavFileAsync(
+        string text,
+        string wavPath,
+        float speed,
+        CancellationToken cancellationToken)
     {
-        var piperExe = Path.Combine(Transcription.AppStorage.PiperDirectory, "piper.exe");
+        var piperExe = Path.Combine(AppStorage.PiperDirectory, "piper.exe");
         var onnx = VoiceOnnxPath();
         if (!File.Exists(piperExe) || !File.Exists(onnx))
         {
-            throw new InvalidOperationException("The Piper voice is not installed. Try speaking again to download it.");
+            throw new InvalidOperationException("The Piper voice is not installed. Open File → Voice settings to download it.");
         }
 
         if (File.Exists(wavPath))
@@ -91,11 +74,13 @@ internal sealed class PiperTtsEngine : ITextToSpeechEngine
             File.Delete(wavPath);
         }
 
+        var lengthScale = speed <= 0 ? 1f : 1f / speed;
         var start = new ProcessStartInfo
         {
             FileName = piperExe,
-            Arguments = $"--model \"{onnx}\" --output_file \"{wavPath}\" --quiet",
-            WorkingDirectory = Transcription.AppStorage.PiperDirectory,
+            Arguments =
+                $"--model \"{onnx}\" --output_file \"{wavPath}\" --length-scale {lengthScale.ToString(CultureInfo.InvariantCulture)} --quiet",
+            WorkingDirectory = AppStorage.PiperDirectory,
             RedirectStandardInput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -126,7 +111,7 @@ internal sealed class PiperTtsEngine : ITextToSpeechEngine
         }
     }
 
-    private string VoiceFolder => Path.Combine(Transcription.AppStorage.TtsVoicesDirectory, _fileStem);
+    private string VoiceFolder => Path.Combine(AppStorage.TtsVoicesDirectory, _fileStem);
 
     private string VoiceOnnxPath() => Path.Combine(VoiceFolder, _fileStem + ".onnx");
 
@@ -134,42 +119,34 @@ internal sealed class PiperTtsEngine : ITextToSpeechEngine
 
     private async Task DownloadAndExtractPiperAsync(CancellationToken cancellationToken)
     {
-        var zipPath = Path.Combine(Transcription.AppStorage.Root, "piper_windows_amd64.zip");
-        await DownloadFileAsync(PiperZipUrl, zipPath, cancellationToken).ConfigureAwait(false);
-        await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, Transcription.AppStorage.Root, overwriteFiles: true), cancellationToken)
+        var zipPath = Path.Combine(AppStorage.Root, "piper_windows_amd64.zip");
+        await TtsDownloader.DownloadFileAsync(PiperZipUrl, zipPath, progress: null, cancellationToken)
             .ConfigureAwait(false);
-        try
-        {
-            File.Delete(zipPath);
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup.
-        }
+        await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, AppStorage.Root, overwriteFiles: true), cancellationToken)
+            .ConfigureAwait(false);
+        TtsDownloader.TryDelete(zipPath);
 
-        if (!File.Exists(Path.Combine(Transcription.AppStorage.PiperDirectory, "piper.exe")))
+        if (!File.Exists(Path.Combine(AppStorage.PiperDirectory, "piper.exe")))
         {
             throw new InvalidOperationException("Piper downloaded but piper.exe was not found.");
         }
     }
 
-    private async Task DownloadVoiceAsync(CancellationToken cancellationToken)
+    private async Task DownloadVoiceAsync(IProgress<double>? progress, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(VoiceFolder);
-        await DownloadFileAsync(VoiceBaseUrl + _repoPath + ".onnx?download=true", VoiceOnnxPath(), cancellationToken).ConfigureAwait(false);
-        await DownloadFileAsync(VoiceBaseUrl + _repoPath + ".onnx.json?download=true", VoiceJsonPath(), cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task DownloadFileAsync(string url, string destination, CancellationToken cancellationToken)
-    {
-        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-        http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "SpeechHandler/1.0");
-        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var output = File.Create(destination);
-        await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+        var onnxProgress = new Progress<double>(value => progress?.Report(value * 0.92));
+        await TtsDownloader.DownloadFileAsync(
+            VoiceBaseUrl + _repoPath + ".onnx?download=true",
+            VoiceOnnxPath(),
+            onnxProgress,
+            cancellationToken).ConfigureAwait(false);
+        await TtsDownloader.DownloadFileAsync(
+            VoiceBaseUrl + _repoPath + ".onnx.json?download=true",
+            VoiceJsonPath(),
+            progress: null,
+            cancellationToken).ConfigureAwait(false);
+        progress?.Report(100);
     }
 
     private static void TryKill(Process process)

@@ -13,7 +13,8 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
-                <MenuItem x:Name="SettingsMenuItem" Header="_Settings…" Click="Settings_Click"/>
+                <MenuItem x:Name="SettingsMenuItem" Header="_Transcription settings…" Click="Settings_Click"/>
+                <MenuItem x:Name="TtsSettingsMenuItem" Header="_Voice settings…" Click="TtsSettings_Click"/>
                 <Separator/>
                 <MenuItem Header="E_xit" Click="Exit_Click"/>
             </MenuItem>
@@ -342,9 +343,12 @@
             <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <ComboBox x:Name="TtsVoiceCombo" Width="240" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="TtsVoiceCombo" Width="320" VerticalAlignment="Center"
+                                  SelectionChanged="TtsVoiceCombo_SelectionChanged"/>
                         <Button x:Name="SpeakButton" Style="{StaticResource PrimaryButton}" Content="Speak transcript"
                                 Margin="8,0,0,0" MinWidth="150" Click="Speak_Click"/>
+                        <Button x:Name="SaveAudioButton" Style="{StaticResource SecondaryButton}" Content="Save audio…"
+                                Margin="8,0,0,0" MinWidth="130" Click="SaveAudio_Click"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <Button Style="{StaticResource SecondaryButton}" Content="Copy" MinWidth="90" Click="Copy_Click"/>

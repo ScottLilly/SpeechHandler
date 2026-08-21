@@ -17,7 +17,7 @@
             <TextBlock FontSize="22" FontWeight="SemiBold" Text="Speech Handler"/>
             <TextBlock x:Name="VersionText" Margin="0,8,0,0" FontSize="14"/>
             <TextBlock Margin="0,16,0,0" TextWrapping="Wrap"
-                       Text="Transcribe live audio and files with a local Vosk model or a cloud speech API, then play the transcript with a neural voice."/>
+                       Text="Transcribe live audio and files with a local Vosk model or a cloud speech API, then play the transcript with a Kokoro or Piper neural voice."/>
         </StackPanel>
     </DockPanel>
 </Window>

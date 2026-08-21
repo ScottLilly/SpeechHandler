@@ -60,6 +60,10 @@
             "Vosk": {
               "target": "Package",
               "version": "[0.3.38, )"
+            },
+            "org.k2fsa.sherpa.onnx": {
+              "target": "Package",
+              "version": "[1.13.5, )"
             }
           },
           "imports": [
@@ -372,6 +376,11 @@
             "System.Xml.XPath": "(,4.3.32767]",
             "System.Xml.XPath.XDocument": "(,5.0.32767]"
           }
+        }
+      },
+      "runtimes": {
+        "win-x64": {
+          "#import": []
         }
       }
     }

@@ -7,15 +7,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <Version>1.0.0</Version>
     <Product>Speech Handler</Product>
     <Description>Transcribe live audio and files with a local Vosk model or a cloud speech API.</Description>
     <ApplicationIcon />
   </PropertyGroup>
 
-  <!-- Vosk native binaries (x64). The package targets also copy these; this keeps output self-contained. -->
+  <!-- Native binaries (x64). The package targets also copy these; this keeps output self-contained. -->
   <ItemGroup>
     <None Include="$(NuGetPackageRoot)vosk\0.3.38\build\lib\win-x64\*.dll" Condition="Exists('$(NuGetPackageRoot)vosk\0.3.38\build\lib\win-x64')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>%(Filename)%(Extension)</Link>
+      <Visible>false</Visible>
+    </None>
+    <None Include="$(NuGetPackageRoot)org.k2fsa.sherpa.onnx.runtime.win-x64\1.13.5\runtimes\win-x64\native\*.dll" Condition="Exists('$(NuGetPackageRoot)org.k2fsa.sherpa.onnx.runtime.win-x64\1.13.5\runtimes\win-x64\native')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>%(Filename)%(Extension)</Link>
       <Visible>false</Visible>
@@ -25,6 +32,7 @@
   <ItemGroup>
     <PackageReference Include="NAudio" Version="3.0.1" />
     <PackageReference Include="Vosk" Version="0.3.38" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
   </ItemGroup>
 
 </Project>

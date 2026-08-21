@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "MpLGyhUpP6Y=",
+  "dgSpecHash": "JjWsKV9q8vQ=",
   "success": true,
   "projectFilePath": "D:\\Development\\Percogna\\SpeechHandler\\SpeechHandler\\SpeechHandler.csproj",
   "expectedPackageFiles": [
@@ -12,6 +12,16 @@
     "C:\\Users\\scott\\.nuget\\packages\\naudio.wasapi\\3.0.1\\naudio.wasapi.3.0.1.nupkg.sha512",
     "C:\\Users\\scott\\.nuget\\packages\\naudio.winforms\\3.0.1\\naudio.winforms.3.0.1.nupkg.sha512",
     "C:\\Users\\scott\\.nuget\\packages\\naudio.winmm\\3.0.1\\naudio.winmm.3.0.1.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx\\1.13.5\\org.k2fsa.sherpa.onnx.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.android-arm64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.android-arm64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.android-x64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.android-x64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.linux-arm64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.linux-arm64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.linux-x64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.linux-x64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.osx-arm64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.osx-arm64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.osx-x64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.osx-x64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.win-arm64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.win-arm64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.win-x64\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.win-x64.1.13.5.nupkg.sha512",
+    "C:\\Users\\scott\\.nuget\\packages\\org.k2fsa.sherpa.onnx.runtime.win-x86\\1.13.5\\org.k2fsa.sherpa.onnx.runtime.win-x86.1.13.5.nupkg.sha512",
     "C:\\Users\\scott\\.nuget\\packages\\system.numerics.tensors\\9.0.0\\system.numerics.tensors.9.0.0.nupkg.sha512",
     "C:\\Users\\scott\\.nuget\\packages\\vosk\\0.3.38\\vosk.0.3.38.nupkg.sha512"
   ],

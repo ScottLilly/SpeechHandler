@@ -1,15 +1,17 @@
 {
   "runtimeTarget": {
-    "name": ".NETCoreApp,Version=v10.0",
+    "name": ".NETCoreApp,Version=v10.0/win-x64",
     "signature": ""
   },
   "compilationOptions": {},
   "targets": {
-    ".NETCoreApp,Version=v10.0": {
+    ".NETCoreApp,Version=v10.0": {},
+    ".NETCoreApp,Version=v10.0/win-x64": {
       "SpeechHandler/1.0.0": {
         "dependencies": {
           "NAudio": "3.0.1",
-          "Vosk": "0.3.38"
+          "Vosk": "0.3.38",
+          "org.k2fsa.sherpa.onnx": "1.13.5"
         },
         "runtime": {
           "SpeechHandler.dll": {}
@@ -110,6 +112,27 @@
           }
         }
       },
+      "org.k2fsa.sherpa.onnx/1.13.5": {
+        "dependencies": {
+          "org.k2fsa.sherpa.onnx.runtime.win-x64": "1.13.5"
+        },
+        "runtime": {
+          "lib/net10.0/sherpa-onnx.dll": {
+            "assemblyVersion": "1.13.5.0",
+            "fileVersion": "1.13.5.0"
+          }
+        }
+      },
+      "org.k2fsa.sherpa.onnx.runtime.win-x64/1.13.5": {
+        "native": {
+          "runtimes/win-x64/native/onnxruntime.dll": {
+            "fileVersion": "1.27.1.0"
+          },
+          "runtimes/win-x64/native/sherpa-onnx-c-api.dll": {
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
       "System.Numerics.Tensors/9.0.0": {
         "runtime": {
           "lib/net9.0/System.Numerics.Tensors.dll": {
@@ -189,6 +212,20 @@
       "sha512": "sha512-qeedyr0TtKWjEirwVG2ZkL1ecYVUfyh+s0YLsau6XC2FqyqT42LfR96kVEuDdv6U9LUp+aNGDiHO5MK/td0BAA==",
       "path": "naudio.winmm/3.0.1",
       "hashPath": "naudio.winmm.3.0.1.nupkg.sha512"
+    },
+    "org.k2fsa.sherpa.onnx/1.13.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-YCk9fwwlioQ2F9dQHhHpUyP96O+YWn3WTQJERWXdHqWgHOMzwKu+TKgW9Rx8hKA3ukDJwS1i5OqLdSCB4bUbvw==",
+      "path": "org.k2fsa.sherpa.onnx/1.13.5",
+      "hashPath": "org.k2fsa.sherpa.onnx.1.13.5.nupkg.sha512"
+    },
+    "org.k2fsa.sherpa.onnx.runtime.win-x64/1.13.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-IeH3t8RFhBI+AifZksnG3yvetC3/K7KV2Uo7kVWILN0M67UqC1OHE3T9saDersFaRxCWFFz1pV9L+Hsngj2wCg==",
+      "path": "org.k2fsa.sherpa.onnx.runtime.win-x64/1.13.5",
+      "hashPath": "org.k2fsa.sherpa.onnx.runtime.win-x64.1.13.5.nupkg.sha512"
     },
     "System.Numerics.Tensors/9.0.0": {
       "type": "package",
