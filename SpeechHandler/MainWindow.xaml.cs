@@ -4,6 +4,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using NAudio.Wave;
 using SpeechHandler.Audio;
@@ -44,8 +45,13 @@ public partial class MainWindow : Window
     private WaveOut? _ttsPlayer;
     private AudioFileReader? _ttsReader;
     private string? _ttsTempFile;
+    private readonly DispatcherTimer _inputLevelTimer;
+    private string? _monitorSourceId;
+    private float _capturePeak;
+    private float _devicePeak;
     private bool _isLive;
     private bool _busy;
+    private bool _closing;
     private bool _ttsPlaying;
     private string? _lastFinalRaw;
     private string? _selectedAudioFile;
@@ -68,6 +74,9 @@ public partial class MainWindow : Window
         TranscriptSpelling.Attach(SrtBox, skipSrtMetadata: true);
         TranscriptSpelling.WordCorrected = SyncSpellingCorrection;
         _vosk.CacheChanged += (_, _) => Dispatcher.BeginInvoke(RefreshCacheUi);
+        _inputLevelTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(75) };
+        _inputLevelTimer.Tick += InputLevelTimer_Tick;
+        Loaded += (_, _) => EnsureInputMonitor();
         LoadSettingsIntoUi();
 
         var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
@@ -421,17 +430,23 @@ public partial class MainWindow : Window
         SourcesCombo.ItemsSource = sources;
         if (sources.Count == 0)
         {
+            EnsureInputMonitor();
             SetStatus("No audio input devices were found.", ErrorBrush);
             return;
         }
 
         var match = sources.FirstOrDefault(s => s.Id == previousId);
         SourcesCombo.SelectedItem = match ?? sources[0];
+        EnsureInputMonitor();
         if (!_isLive && !_busy)
         {
             SetStatus("Ready", IdleBrush);
         }
     }
+
+    private void SourceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e) => EnsureInputMonitor();
+
+    private void SourcesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => EnsureInputMonitor();
 
     private async void StartLive_Click(object sender, RoutedEventArgs e)
     {
@@ -470,12 +485,19 @@ public partial class MainWindow : Window
             _sessionTimeOffset = NextSessionTimeOffset();
             _liveApiPcmBytes = 0;
 
-            _capture = new LiveAudioCapture(source.Id, source.Kind);
-            _capture.PcmAvailable += OnLivePcm;
-            _capture.Stopped += OnCaptureStopped;
-            _capture.Start();
+            if (_capture is null || _monitorSourceId != source.Id)
+            {
+                StartInputMonitor(source);
+            }
+
+            if (_capture is null)
+            {
+                throw new InvalidOperationException("Could not open the selected input device.");
+            }
 
             _isLive = true;
+            _capture.PcmAvailable -= OnLivePcm;
+            _capture.PcmAvailable += OnLivePcm;
             ProcessingMessage.Text = $"Processing live audio from {source.DisplayName}…";
             ProcessingBar.IsIndeterminate = true;
             ProcessingOverlay.Visibility = Visibility.Visible;
@@ -484,12 +506,14 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            CleanupLive();
+            CleanupLive(disposeCapture: false);
+            EnsureInputMonitor();
             SetStatus("Canceled.", IdleBrush);
         }
         catch (Exception ex)
         {
-            CleanupLive();
+            CleanupLive(disposeCapture: false);
+            EnsureInputMonitor();
             ShowError("Could not start live transcription.", ex);
         }
         finally
@@ -527,7 +551,7 @@ public partial class MainWindow : Window
             _liveApiBuffer = null;
         }
 
-        CleanupLive(disposeSession: false);
+        CleanupLive(disposeSession: false, disposeCapture: false);
 
         try
         {
@@ -556,6 +580,7 @@ public partial class MainWindow : Window
 
         PartialText.Text = string.Empty;
         EndWork();
+        EnsureInputMonitor();
         SetStatus("Ready", IdleBrush);
     }
 
@@ -949,6 +974,8 @@ public partial class MainWindow : Window
 
     private async void Window_Closed(object? sender, EventArgs e)
     {
+        _closing = true;
+        _inputLevelTimer.Stop();
         PersistSettings();
         TranscriptSpelling.Detach();
         _workCts?.Cancel();
@@ -1404,27 +1431,46 @@ public partial class MainWindow : Window
 
     private void OnCaptureStopped(Exception? error)
     {
-        if (error is null || !_isLive)
+        if (error is null)
         {
             return;
         }
 
         Dispatcher.BeginInvoke(() =>
         {
-            ShowError("Audio capture stopped unexpectedly.", error);
-            _ = StopLiveAsync();
+            if (_isLive)
+            {
+                ShowError("Audio capture stopped unexpectedly.", error);
+                _ = StopLiveAsync();
+                return;
+            }
+
+            StopInputMonitor();
+            InputLevelBar.Value = 0;
+            InputLevelBar.Foreground = ErrorBrush;
+            SetStatus(string.IsNullOrWhiteSpace(error.Message)
+                ? "Capture stopped."
+                : error.Message, ErrorBrush);
         });
     }
 
-    private void CleanupLive(bool disposeSession = true)
+    private void CleanupLive(bool disposeSession = true, bool disposeCapture = true)
     {
         _isLive = false;
         if (_capture is not null)
         {
             _capture.PcmAvailable -= OnLivePcm;
-            _capture.Stopped -= OnCaptureStopped;
-            _capture.Dispose();
-            _capture = null;
+            if (disposeCapture)
+            {
+                _capture.LevelAvailable -= OnCaptureLevel;
+                _capture.Stopped -= OnCaptureStopped;
+                _capture.Dispose();
+                _capture = null;
+                _monitorSourceId = null;
+                _inputLevelTimer.Stop();
+                _capturePeak = 0;
+                _devicePeak = 0;
+            }
         }
 
         if (disposeSession)
@@ -1439,6 +1485,166 @@ public partial class MainWindow : Window
         }
 
         UpdateActionButtons();
+    }
+
+    private void EnsureInputMonitor()
+    {
+        if (_closing || !IsLoaded)
+        {
+            return;
+        }
+
+        if (SourceTabs.SelectedIndex != 1)
+        {
+            if (!_isLive)
+            {
+                StopInputMonitor();
+                ResetInputLevelUi();
+            }
+
+            return;
+        }
+
+        if (SourcesCombo.SelectedItem is not AudioInputSource source)
+        {
+            if (!_isLive)
+            {
+                StopInputMonitor();
+                ResetInputLevelUi();
+            }
+
+            return;
+        }
+
+        if (_capture is not null && _monitorSourceId == source.Id)
+        {
+            return;
+        }
+
+        if (_isLive)
+        {
+            return;
+        }
+
+        StartInputMonitor(source);
+    }
+
+    private void StartInputMonitor(AudioInputSource source)
+    {
+        StopInputMonitor();
+        try
+        {
+            _capture = new LiveAudioCapture(source.Id, source.Kind);
+            _capture.LevelAvailable += OnCaptureLevel;
+            _capture.Stopped += OnCaptureStopped;
+            _capture.Start();
+            _monitorSourceId = source.Id;
+            _capturePeak = 0;
+            _devicePeak = 0;
+            _inputLevelTimer.Start();
+            ResetInputLevelUi();
+        }
+        catch (Exception ex)
+        {
+            StopInputMonitor();
+            InputLevelBar.Value = 0;
+            InputLevelBar.Foreground = ErrorBrush;
+            if (!_isLive && !_busy)
+            {
+                SetStatus($"Could not open {source.DisplayName}.", ErrorBrush);
+            }
+        }
+    }
+
+    private void StopInputMonitor()
+    {
+        _inputLevelTimer.Stop();
+        if (_capture is null)
+        {
+            _monitorSourceId = null;
+            _capturePeak = 0;
+            _devicePeak = 0;
+            return;
+        }
+
+        _capture.PcmAvailable -= OnLivePcm;
+        _capture.LevelAvailable -= OnCaptureLevel;
+        _capture.Stopped -= OnCaptureStopped;
+        _capture.Dispose();
+        _capture = null;
+        _monitorSourceId = null;
+        _capturePeak = 0;
+        _devicePeak = 0;
+    }
+
+    private void OnCaptureLevel(AudioInputLevel level)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (level.CapturePeak > _capturePeak)
+            {
+                _capturePeak = level.CapturePeak;
+            }
+
+            if (level.DevicePeak > _devicePeak)
+            {
+                _devicePeak = level.DevicePeak;
+            }
+
+            UpdateInputLevelUi();
+        });
+    }
+
+    private void InputLevelTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_capture is not null)
+        {
+            var meter = _capture.DevicePeak;
+            if (meter > _devicePeak)
+            {
+                _devicePeak = meter;
+            }
+        }
+
+        _capturePeak *= 0.72f;
+        _devicePeak *= 0.72f;
+        if (_capturePeak < 0.002f)
+        {
+            _capturePeak = 0;
+        }
+
+        if (_devicePeak < 0.002f)
+        {
+            _devicePeak = 0;
+        }
+
+        UpdateInputLevelUi();
+    }
+
+    private void UpdateInputLevelUi()
+    {
+        var peak = Math.Max(_capturePeak, _devicePeak);
+        InputLevelBar.Value = Math.Sqrt(peak);
+        const float signalFloor = 0.02f;
+        if (_capturePeak >= signalFloor)
+        {
+            InputLevelBar.Foreground = LiveBrush;
+            return;
+        }
+
+        if (_devicePeak >= signalFloor)
+        {
+            InputLevelBar.Foreground = ProcessingBrush;
+            return;
+        }
+
+        InputLevelBar.Foreground = IdleBrush;
+    }
+
+    private void ResetInputLevelUi()
+    {
+        InputLevelBar.Value = 0;
+        InputLevelBar.Foreground = IdleBrush;
     }
 
     private CancellationTokenSource BeginWork(string message, bool determinate = false, bool showOverlay = true)
@@ -1546,6 +1752,23 @@ public partial class MainWindow : Window
         }
 
         var preparedWords = TranscriptText.PrepareWords(_timedWords, words, prepared.Existing, formatAsSentences);
+        if (_timedWords.Count > 0)
+        {
+            var syncedExisting = TranscriptText.SyncTrailingWord(TranscriptBox.Text, _timedWords[^1].Text);
+            if (!string.Equals(TranscriptBox.Text, syncedExisting, StringComparison.Ordinal))
+            {
+                TranscriptBox.Text = syncedExisting;
+            }
+
+            if (formatAsSentences && prepared.Incoming.Length > 0)
+            {
+                prepared = prepared with
+                {
+                    Incoming = TranscriptText.FormatAsSentences(prepared.Incoming, syncedExisting)
+                };
+            }
+        }
+
         if (preparedWords.Count > 0)
         {
             _timedWords.AddRange(preparedWords);

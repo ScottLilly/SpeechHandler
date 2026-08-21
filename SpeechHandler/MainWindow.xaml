@@ -99,34 +99,24 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <TabControl Grid.Row="2" Grid.ColumnSpan="2"
+                    <TabControl x:Name="SourceTabs" Grid.Row="2" Grid.ColumnSpan="2"
                                 Style="{StaticResource SourceTabControl}"
-                                ItemContainerStyle="{StaticResource SourceTabItem}">
+                                ItemContainerStyle="{StaticResource SourceTabItem}"
+                                SelectionChanged="SourceTabs_SelectionChanged">
                         <TabItem>
                             <TabItem.Header>
                                 <TextBlock Text="Audio file" TextWrapping="Wrap" TextAlignment="Center"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
                             </TabItem.Header>
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
-                                           FontSize="13" Foreground="{StaticResource TextPrimary}"
-                                           Text="Choose a recording, then transcribe it."/>
-                                <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="8"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Button x:Name="ChooseFileButton" Style="{StaticResource SecondaryButton}"
-                                            Content="Choose file…" HorizontalAlignment="Stretch"
-                                            Click="ChooseFile_Click"/>
-                                    <Button x:Name="TranscribeFileButton" Grid.Column="2" Style="{StaticResource PrimaryButton}"
-                                            Content="Transcribe" HorizontalAlignment="Stretch"
-                                            IsEnabled="False" Click="TranscribeFile_Click"/>
-                                </Grid>
+                            <Grid MinHeight="144">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
                                 <TextBlock x:Name="FilePlaceholder" Style="{StaticResource MutedText}"
-                                           TextWrapping="Wrap" VerticalAlignment="Center"
-                                           Text="No file selected. Name, length, size, and format will appear here."/>
+                                           TextWrapping="Wrap" TextAlignment="Center"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Text="No file selected."/>
                                 <Grid x:Name="FileDetailsPanel" Visibility="Collapsed" VerticalAlignment="Center">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -151,18 +141,55 @@
                                     <TextBlock x:Name="SelectedFileFormat" Grid.Row="3" Grid.Column="1"
                                                Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
                                 </Grid>
-                            </DockPanel>
+                                <Grid Grid.Row="1" Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="ChooseFileButton" Style="{StaticResource SecondaryButton}"
+                                            Content="Choose file…" HorizontalAlignment="Stretch"
+                                            Click="ChooseFile_Click"/>
+                                    <Button x:Name="TranscribeFileButton" Grid.Column="2" Style="{StaticResource PrimaryButton}"
+                                            Content="Transcribe" HorizontalAlignment="Stretch"
+                                            IsEnabled="False" Click="TranscribeFile_Click"/>
+                                </Grid>
+                            </Grid>
                         </TabItem>
                         <TabItem>
                             <TabItem.Header>
                                 <TextBlock Text="Live transcription" TextWrapping="Wrap" TextAlignment="Center"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
                             </TabItem.Header>
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
-                                           FontSize="13" Foreground="{StaticResource TextPrimary}"
-                                           Text="Capture from a microphone or from system audio."/>
-                                <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0">
+                            <Grid MinHeight="144">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Input source" Style="{StaticResource MutedText}"/>
+                                <DockPanel Grid.Row="1" Margin="0,6,0,0" LastChildFill="True">
+                                    <Button x:Name="RefreshSourcesButton" DockPanel.Dock="Right"
+                                            Style="{StaticResource SecondaryButton}" Content="Refresh"
+                                            MinWidth="80" Padding="10,4" Margin="8,0,0,0"
+                                            Click="RefreshSources_Click"/>
+                                    <ComboBox x:Name="SourcesCombo" DisplayMemberPath="DisplayName"
+                                              HorizontalAlignment="Stretch" Margin="0" Padding="0,6,8,6"
+                                              SelectionChanged="SourcesCombo_SelectionChanged"/>
+                                </DockPanel>
+                                <Grid Grid.Row="2" Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Input level" Style="{StaticResource MutedText}"
+                                               VerticalAlignment="Center"/>
+                                    <ProgressBar x:Name="InputLevelBar" Grid.Column="1" Margin="12,0,0,0"
+                                                 Minimum="0" Maximum="1" Value="0" Height="16"
+                                                 VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Grid.Row="3" Margin="0,14,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="8"/>
@@ -175,21 +202,7 @@
                                             Content="Stop" HorizontalAlignment="Stretch"
                                             IsEnabled="False" Click="StopLive_Click"/>
                                 </Grid>
-                                <StackPanel VerticalAlignment="Center">
-                                    <Label Content="Input source" Padding="0,0,0,6" HorizontalAlignment="Left"/>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <ComboBox x:Name="SourcesCombo" DisplayMemberPath="DisplayName"/>
-                                        <Button x:Name="RefreshSourcesButton" Grid.Column="1"
-                                                Style="{StaticResource SecondaryButton}" Content="Refresh"
-                                                MinWidth="80" Padding="10,4" Margin="8,0,0,0"
-                                                Click="RefreshSources_Click"/>
-                                    </Grid>
-                                </StackPanel>
-                            </DockPanel>
+                            </Grid>
                         </TabItem>
                     </TabControl>
                 </Grid>

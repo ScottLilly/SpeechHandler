@@ -191,9 +191,12 @@
                                     BorderBrush="{StaticResource CardBorder}"
                                     BorderThickness="1"
                                     CornerRadius="0,8,8,8"
-                                    Padding="16"
-                                    MinHeight="160">
-                                <ContentPresenter ContentSource="SelectedContent"/>
+                                    Padding="12"
+                                    MinHeight="168"
+                                    VerticalAlignment="Stretch">
+                                <ContentPresenter ContentSource="SelectedContent"
+                                                  HorizontalAlignment="Stretch"
+                                                  VerticalAlignment="Stretch"/>
                             </Border>
                         </DockPanel>
                     </ControlTemplate>
@@ -204,7 +207,7 @@
         <Style x:Key="SourceTabItem" TargetType="TabItem">
             <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Padding" Value="14,16"/>
+            <Setter Property="Padding" Value="12,10"/>
             <Setter Property="Width" Value="148"/>
             <Setter Property="Template">
                 <Setter.Value>

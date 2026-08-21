@@ -6,10 +6,20 @@ internal readonly record struct PreparedTranscript(string Existing, string Incom
 
 internal static class TranscriptText
 {
+    internal const double CommaPauseSeconds = 0.3;
+    internal const double PeriodPauseSeconds = 0.7;
+
     private static readonly HashSet<string> ProtectedShortWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "a", "am", "an", "as", "at", "be", "by", "do", "go", "he", "i", "if", "in", "is", "it",
         "me", "my", "no", "of", "oh", "on", "or", "so", "to", "up", "us", "we"
+    };
+
+    private static readonly HashSet<string> NoCommaAfter = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "an", "the", "and", "or", "but", "nor", "of", "to", "for", "with", "at", "by",
+        "from", "in", "on", "is", "are", "was", "were", "be", "been", "i", "we", "you", "he",
+        "she", "it", "they", "my", "your"
     };
 
     public static PreparedTranscript Prepare(string existing, string incoming, bool formatAsSentences)
@@ -145,6 +155,38 @@ internal static class TranscriptText
             .ToList();
     }
 
+    internal static string SyncTrailingWord(string existingText, string updatedLastWord)
+    {
+        existingText = existingText.TrimEnd();
+        if (existingText.Length == 0 || string.IsNullOrWhiteSpace(updatedLastWord))
+        {
+            return existingText;
+        }
+
+        var lastWord = GetLastWord(existingText, out var start);
+        if (!CoreWord(lastWord).Equals(CoreWord(updatedLastWord), StringComparison.OrdinalIgnoreCase))
+        {
+            return existingText;
+        }
+
+        return existingText[..start] + updatedLastWord;
+    }
+
+    internal static char? PunctuationForPause(double gapSeconds, string? previousWord = null)
+    {
+        if (gapSeconds >= PeriodPauseSeconds)
+        {
+            return '.';
+        }
+
+        if (gapSeconds >= CommaPauseSeconds && !ShouldSkipComma(previousWord))
+        {
+            return ',';
+        }
+
+        return null;
+    }
+
     private static void ApplyPausePunctuation(List<TimedWord> existing, List<TimedWord> incoming)
     {
         if (incoming.Count == 0)
@@ -154,29 +196,45 @@ internal static class TranscriptText
 
         if (existing.Count > 0)
         {
-            MaybeAppendPeriod(existing, existing.Count - 1, incoming[0].StartSeconds);
+            MaybeAppendPausePunctuation(existing, existing.Count - 1, incoming[0].StartSeconds);
         }
 
         for (var i = 1; i < incoming.Count; i++)
         {
-            MaybeAppendPeriod(incoming, i - 1, incoming[i].StartSeconds);
+            MaybeAppendPausePunctuation(incoming, i - 1, incoming[i].StartSeconds);
         }
     }
 
-    private static void MaybeAppendPeriod(List<TimedWord> words, int index, double nextStart)
+    private static void MaybeAppendPausePunctuation(List<TimedWord> words, int index, double nextStart)
     {
         var previous = words[index];
-        if (nextStart - previous.EndSeconds < 0.7)
+        var mark = PunctuationForPause(nextStart - previous.EndSeconds, previous.Text);
+        if (mark is null)
         {
             return;
         }
 
         var text = previous.Text.TrimEnd();
-        if (text.Length > 0 && text[^1] is not '.' and not '!' and not '?')
+        if (text.Length == 0 || EndsWithPausePunctuation(text))
         {
-            words[index] = previous with { Text = text + "." };
+            return;
         }
+
+        words[index] = previous with { Text = text + mark };
     }
+
+    private static bool ShouldSkipComma(string? previousWord)
+    {
+        if (string.IsNullOrWhiteSpace(previousWord))
+        {
+            return false;
+        }
+
+        return NoCommaAfter.Contains(CoreWord(previousWord));
+    }
+
+    private static bool EndsWithPausePunctuation(string text) =>
+        text[^1] is '.' or ',' or '!' or '?' or ';' or ':';
 
     private static void FormatWordList(List<TimedWord> words, string existingText)
     {

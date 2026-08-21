@@ -604,19 +604,26 @@ internal sealed class VoskSession : IDisposable
     {
         var builder = new StringBuilder();
         var lastEnd = -1.0;
+        string? lastText = null;
         foreach (var word in words)
         {
             if (builder.Length > 0)
             {
-                // A long pause inside an utterance is a reliable sentence break.
-                // Commas are not: pauses and comma placement often disagree.
-                builder.Append(lastEnd >= 0 && word.StartSeconds - lastEnd >= 0.7
-                    ? ". "
-                    : " ");
+                if (lastEnd >= 0)
+                {
+                    var mark = TranscriptText.PunctuationForPause(word.StartSeconds - lastEnd, lastText);
+                    if (mark is char punctuation)
+                    {
+                        builder.Append(punctuation);
+                    }
+                }
+
+                builder.Append(' ');
             }
 
             builder.Append(word.Text);
             lastEnd = word.EndSeconds;
+            lastText = word.Text;
         }
 
         return builder.ToString();
