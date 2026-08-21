@@ -25,6 +25,30 @@
                 <ComboBoxItem Content="ElevenLabs"/>
             </ComboBox>
 
+            <TextBlock Style="{StaticResource SectionTitle}" Margin="0,16,0,0" Text="Vosk memory cache"/>
+            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                       Text="Recently used local models stay in RAM so you can switch without reloading. Set a limit so they cannot fill the computer."/>
+            <TextBlock x:Name="PhysicalRamText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+            <TextBlock x:Name="SuggestedRamText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,4,0,8"/>
+            <Label Content="Cache limit" Padding="0,0,0,6" HorizontalAlignment="Left"/>
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="CacheBudgetMinus" Style="{StaticResource SecondaryButton}"
+                        Content="−" MinWidth="36" Padding="0,6" Width="36"
+                        Click="CacheBudgetMinus_Click"/>
+                <TextBox x:Name="CacheBudgetBox" Width="72" Margin="6,0"
+                         TextAlignment="Center" MaxLength="3"
+                         VerticalContentAlignment="Center"
+                         PreviewTextInput="CacheBudgetBox_PreviewTextInput"
+                         PreviewKeyDown="CacheBudgetBox_PreviewKeyDown"
+                         LostFocus="CacheBudgetBox_LostFocus"/>
+                <Button x:Name="CacheBudgetPlus" Style="{StaticResource SecondaryButton}"
+                        Content="+" MinWidth="36" Padding="0,6" Width="36"
+                        Click="CacheBudgetPlus_Click"/>
+                <TextBlock Text="GB" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <TextBlock x:Name="CacheBudgetHint" Style="{StaticResource MutedText}"
+                       TextWrapping="Wrap" Margin="0,8,0,0"/>
+
             <StackPanel x:Name="LocalSettingsPanel" Margin="0,16,0,0">
                 <TextBlock Style="{StaticResource SectionTitle}" Text="Vosk model"/>
                 <Label Content="Language" Padding="0,0,0,6" HorizontalAlignment="Left"/>

@@ -14,6 +14,17 @@ namespace SpeechHandler;
 
 public partial class MainWindow : Window
 {
+    private static readonly Color[] CacheSliceColors =
+    [
+        Color.FromRgb(0x3D, 0x9C, 0xF0),
+        Color.FromRgb(0x3D, 0xDC, 0x97),
+        Color.FromRgb(0xF5, 0xC1, 0x4A),
+        Color.FromRgb(0xA7, 0x8B, 0xFA),
+        Color.FromRgb(0x5A, 0xAE, 0xF5),
+        Color.FromRgb(0xE1, 0x5D, 0x64)
+    ];
+
+    private static readonly SolidColorBrush CacheFreeBrush = BrushFrom("#2A333C");
     private static readonly SolidColorBrush IdleBrush = BrushFrom("#6B7682");
     private static readonly SolidColorBrush ProcessingBrush = BrushFrom("#F5C14A");
     private static readonly SolidColorBrush LiveBrush = BrushFrom("#3DDC97");
@@ -56,6 +67,7 @@ public partial class MainWindow : Window
         TranscriptSpelling.Attach(SrtBox, skipSrtMetadata: true);
         TranscriptSpelling.WordCorrected = SyncSpellingCorrection;
         TtsVoiceCombo.ItemsSource = TtsVoiceCatalog.Voices;
+        _vosk.CacheChanged += (_, _) => Dispatcher.BeginInvoke(RefreshCacheUi);
         LoadSettingsIntoUi();
 
         var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
@@ -72,6 +84,7 @@ public partial class MainWindow : Window
 
         RefreshSources();
         RefreshEngineSelector();
+        RefreshCacheUi();
         SetStatus("Ready", IdleBrush);
     }
 
@@ -85,15 +98,20 @@ public partial class MainWindow : Window
     {
         TtsVoiceCombo.SelectedItem = TtsVoiceCatalog.Voices.FirstOrDefault(v => v.Id == _settings.TtsVoiceId)
                                      ?? TtsVoiceCatalog.Voices[0];
-        if (VoskModelManager.EnsurePaths(_settings))
+        var settingsChanged = VoskModelManager.EnsurePaths(_settings);
+        settingsChanged |= _settings.EnsureCacheBudget();
+        if (settingsChanged)
         {
             _settings.Save();
         }
+
+        ApplyCacheBudget();
     }
 
     private void PersistSettings()
     {
         _settings.TtsVoiceId = (TtsVoiceCombo.SelectedItem as TtsVoiceOption)?.Id ?? "lessac";
+        _settings.EnsureCacheBudget();
         _settings.Save();
     }
 
@@ -108,7 +126,9 @@ public partial class MainWindow : Window
         dialog.ShowDialog();
         _apiKey = dialog.OpenAiKey;
         _elevenLabsKey = dialog.ElevenLabsKey;
+        ApplyCacheBudget();
         RefreshEngineSelector();
+        RefreshCacheUi();
     }
 
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
@@ -136,6 +156,7 @@ public partial class MainWindow : Window
             LanguageCombo.SelectedItem = language;
             FillModelCombo(language, installed, persist: false);
             ApplyTranscriptLanguage(language);
+            RefreshCacheUi();
         }
         finally
         {
@@ -214,7 +235,11 @@ public partial class MainWindow : Window
             foreach (var model in installed.Where(item =>
                          string.Equals(item.Language, language, StringComparison.Ordinal)))
             {
-                items.Add(new TranscriptionOption("Local", model.DisplayName, model.Path));
+                items.Add(new TranscriptionOption(
+                    "Local",
+                    model.DisplayName,
+                    model.Path,
+                    _vosk.IsLoaded(model.Path)));
             }
         }
 
@@ -273,6 +298,7 @@ public partial class MainWindow : Window
             var language = LanguageCombo.SelectedItem as string;
             FillModelCombo(language, installed, persist: true);
             ApplyTranscriptLanguage(language);
+            RefreshCacheUi();
         }
         finally
         {
@@ -293,6 +319,7 @@ public partial class MainWindow : Window
         }
 
         ApplyTranscriptionOption(option, persist: true);
+        RefreshCacheUi();
     }
 
     private void RefreshSources_Click(object sender, RoutedEventArgs e) => RefreshSources();
@@ -757,12 +784,302 @@ public partial class MainWindow : Window
                        ?? throw new InvalidOperationException("The selected path is not a valid Vosk model folder. Update it in File → Settings.");
         _settings.ModelPath = resolved;
         _settings.Save();
+        ApplyCacheBudget();
 
-        await Task.Run(() =>
+        var plan = _vosk.PlanLoad(resolved);
+        if (plan.AlreadyLoaded)
+        {
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _vosk.EnsureLoaded(resolved);
+            }, cancellationToken);
+            RefreshCacheUi();
+            return;
+        }
+
+        if (!plan.CanLoad)
+        {
+            throw new InvalidOperationException(plan.RefusalReason ?? "There is not enough memory to load that model.");
+        }
+
+        if (plan.NeedsConfirmation)
+        {
+            var confirm = MessageBox.Show(
+                this,
+                plan.ConfirmationMessage,
+                "Load Vosk model",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                throw new OperationCanceledException();
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var evicted = await Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _vosk.EnsureLoaded(resolved);
+            return _vosk.EnsureLoaded(resolved);
         }, cancellationToken);
+
+        RefreshCacheUi();
+        if (evicted.Count > 0)
+        {
+            var message = FormatEviction(evicted, plan.DisplayName);
+            ProcessingMessage.Text = message;
+            SetStatus(message, ProcessingBrush);
+        }
+    }
+
+    private void ApplyCacheBudget()
+    {
+        _settings.EnsureCacheBudget();
+        _vosk.SetBudgetGigabytes(_settings.ModelCacheBudgetGb);
+    }
+
+    private void RefreshCacheUi()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(RefreshCacheUi);
+            return;
+        }
+
+        var snapshot = _vosk.Snapshot();
+        var used = snapshot.Sum(item => item.PrivateBytes);
+        var budget = _vosk.BudgetBytes;
+        var remaining = Math.Max(0, budget - used);
+        var over = used > budget && snapshot.Count > 0;
+        var countText = snapshot.Count switch
+        {
+            0 => "No models loaded",
+            1 => "1 model loaded",
+            _ => $"{snapshot.Count} models loaded"
+        };
+        var parts = new List<string> { countText };
+        if (snapshot.Count > 0)
+        {
+            parts.Add($"{ProcessMemory.FormatBytes(used)} used");
+        }
+
+        if (over)
+        {
+            parts.Add("over budget");
+        }
+        else
+        {
+            parts.Add($"{ProcessMemory.FormatBytes(remaining)} free");
+        }
+
+        CacheSummaryText.Text = string.Join("  ·  ", parts);
+        RefreshCacheBar(snapshot, budget, used);
+
+        if (InstalledModelCombo.ItemsSource is IEnumerable<TranscriptionOption> items)
+        {
+            var current = items.ToList();
+            if (current.Exists(item => item.Engine == "Local"))
+            {
+                var selectedPath = (InstalledModelCombo.SelectedItem as TranscriptionOption)?.ModelPath;
+                var selectedEngine = (InstalledModelCombo.SelectedItem as TranscriptionOption)?.Engine;
+                var updated = current
+                    .Select(item => item with { InMemory = item.Engine == "Local" && _vosk.IsLoaded(item.ModelPath) })
+                    .ToList();
+                _suppressInstalledModelSelection = true;
+                try
+                {
+                    InstalledModelCombo.ItemsSource = updated;
+                    InstalledModelCombo.SelectedItem = updated.FirstOrDefault(item =>
+                        item.Engine == selectedEngine
+                        && string.Equals(item.ModelPath, selectedPath, StringComparison.OrdinalIgnoreCase))
+                        ?? updated.FirstOrDefault(MatchesCurrentEngine)
+                        ?? updated.FirstOrDefault();
+                }
+                finally
+                {
+                    _suppressInstalledModelSelection = false;
+                }
+            }
+        }
+
+        RefreshLoadedList();
+    }
+
+    private void RefreshLoadedList()
+    {
+        var rows = _vosk.Snapshot().Select(ToLoadedRow).ToList();
+        var used = rows.Sum(row => row.PrivateBytes);
+        var budget = _vosk.BudgetBytes;
+        var remaining = Math.Max(0, budget - used);
+        LoadedModelsTotals.Text = rows.Count == 0
+            ? $"{ProcessMemory.FormatBytes(remaining)} free of {ProcessMemory.FormatBytes(budget)}"
+            : $"{ProcessMemory.FormatBytes(used)} used"
+              + (used > budget ? " (over budget)" : $"  ·  {ProcessMemory.FormatBytes(remaining)} free");
+        LoadedModelsList.ItemsSource = rows;
+        LoadedModelsEmpty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        LoadedModelsList.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static LoadedModelRow ToLoadedRow(LoadedVoskModelInfo info) =>
+        new()
+        {
+            ModelPath = info.Path,
+            Title = info.DisplayName,
+            MemoryText = ProcessMemory.FormatBytes(info.PrivateBytes),
+            LastUsedText = FormatLastUsed(info),
+            PrivateBytes = info.PrivateBytes,
+            CanUnload = info.CanUnload
+        };
+
+    private static string FormatLastUsed(LoadedVoskModelInfo info)
+    {
+        if (info.InUse)
+        {
+            return "In use";
+        }
+
+        var ago = DateTime.UtcNow - info.LastUsedUtc;
+        if (ago.TotalSeconds < 45)
+        {
+            return "Just now";
+        }
+
+        if (ago.TotalMinutes < 60)
+        {
+            var minutes = Math.Max(1, (int)ago.TotalMinutes);
+            return minutes == 1 ? "1 min ago" : $"{minutes} min ago";
+        }
+
+        return info.LastUsedUtc.ToLocalTime().ToString("t");
+    }
+
+    private static string FormatEviction(IReadOnlyList<LoadedVoskModelInfo> evicted, string incomingDisplayName)
+    {
+        var first = evicted[0];
+        var size = ProcessMemory.FormatBytes(first.PrivateBytes);
+        if (evicted.Count == 1)
+        {
+            return $"Unloaded {first.DisplayName} ({size}) to load {incomingDisplayName}.";
+        }
+
+        return $"Unloaded {first.DisplayName} ({size}) and {evicted.Count - 1} other model(s) to load {incomingDisplayName}.";
+    }
+
+    private void RefreshCacheBar(IReadOnlyList<LoadedVoskModelInfo> snapshot, long budget, long used)
+    {
+        CacheBarGrid.Children.Clear();
+        CacheBarGrid.ColumnDefinitions.Clear();
+
+        var scale = Math.Max(budget, used);
+        if (scale <= 0)
+        {
+            scale = 1;
+        }
+
+        var column = 0;
+        for (var i = 0; i < snapshot.Count; i++)
+        {
+            var model = snapshot[i];
+            AddCacheSlice(
+                column++,
+                Math.Max(1, model.PrivateBytes),
+                SliceBrush(i),
+                $"{model.DisplayName} · {ProcessMemory.FormatBytes(model.PrivateBytes)}");
+        }
+
+        var free = Math.Max(0, scale - used);
+        if (snapshot.Count == 0 || free > 0)
+        {
+            AddCacheSlice(
+                column,
+                Math.Max(1, free),
+                CacheFreeBrush,
+                snapshot.Count == 0
+                    ? $"No models loaded · {ProcessMemory.FormatBytes(budget)} available"
+                    : $"{ProcessMemory.FormatBytes(free)} free in cache");
+        }
+    }
+
+    private void AddCacheSlice(int column, long weight, Brush fill, string tooltip)
+    {
+        CacheBarGrid.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(weight, GridUnitType.Star)
+        });
+        var slice = new Border
+        {
+            Background = fill,
+            ToolTip = tooltip
+        };
+        Grid.SetColumn(slice, column);
+        CacheBarGrid.Children.Add(slice);
+    }
+
+    private static SolidColorBrush SliceBrush(int index)
+    {
+        var color = CacheSliceColors[index % CacheSliceColors.Length];
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    private void LoadedModelsButton_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshLoadedList();
+        LoadedModelsPopup.IsOpen = !LoadedModelsPopup.IsOpen;
+    }
+
+    private void Window_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!LoadedModelsPopup.IsOpen || e.OriginalSource is not DependencyObject node)
+        {
+            return;
+        }
+
+        for (DependencyObject? current = node; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, CachePanel)
+                || ReferenceEquals(current, LoadedModelsButton)
+                || ReferenceEquals(current, LoadedModelsPopup.Child))
+            {
+                return;
+            }
+        }
+
+        LoadedModelsPopup.IsOpen = false;
+    }
+
+    private void UnloadModel_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string path })
+        {
+            return;
+        }
+
+        if (!_vosk.Unload(path, out var reason))
+        {
+            MessageBox.Show(
+                this,
+                reason ?? "That model could not be unloaded.",
+                "Speech Handler",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        SetStatus($"Unloaded {VoskModelManager.DisplayLabel(path)}.", IdleBrush);
+        RefreshCacheUi();
+    }
+
+    private sealed class LoadedModelRow
+    {
+        public required string ModelPath { get; init; }
+        public required string Title { get; init; }
+        public required string MemoryText { get; init; }
+        public required string LastUsedText { get; init; }
+        public long PrivateBytes { get; init; }
+        public bool CanUnload { get; init; }
     }
 
     private async Task TranscribeFileLocalAsync(string path, CancellationToken cancellationToken)

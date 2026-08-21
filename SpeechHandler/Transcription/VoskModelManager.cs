@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SpeechHandler.Transcription;
 
@@ -31,6 +33,20 @@ internal sealed class AppSettings
     public string ElevenLabsModel { get; set; } = "scribe_v2";
     public bool TranslateToEnglish { get; set; }
     public string TtsVoiceId { get; set; } = "lessac";
+
+    /// <summary>
+    /// Whole gigabytes reserved for cached Vosk models. 0 means not chosen yet (use the suggested value).
+    /// </summary>
+    public int ModelCacheBudgetGb { get; set; }
+
+    public bool EnsureCacheBudget()
+    {
+        var previous = ModelCacheBudgetGb;
+        ModelCacheBudgetGb = ModelCacheBudgetGb <= 0
+            ? ProcessMemory.SuggestedBudgetGigabytes()
+            : ProcessMemory.ClampBudgetGigabytes(ModelCacheBudgetGb);
+        return previous != ModelCacheBudgetGb;
+    }
 
     public static AppSettings Load()
     {
@@ -78,7 +94,11 @@ internal sealed record InstalledVoskModel(string Id, string Language, string Dis
     public override string ToString() => DisplayName;
 }
 
-internal sealed record TranscriptionOption(string Engine, string DisplayName, string? ModelPath = null)
+internal sealed record TranscriptionOption(
+    string Engine,
+    string DisplayName,
+    string? ModelPath = null,
+    bool InMemory = false)
 {
     public override string ToString() => DisplayName;
 }
@@ -86,6 +106,10 @@ internal sealed record TranscriptionOption(string Engine, string DisplayName, st
 internal static class VoskModelManager
 {
     public const string DefaultLanguage = "English (US)";
+
+    private static readonly Regex CatalogSizePattern = new(
+        @"(\d+(?:\.\d+)?)\s*(MB|GB)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static IReadOnlyList<VoskModelOption> Catalog { get; } =
     [
@@ -248,6 +272,50 @@ internal static class VoskModelManager
         return items;
     }
 
+    public static string DisplayLabel(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "Vosk model";
+        }
+
+        var option = FindOptionForPath(path);
+        if (option is not null)
+        {
+            return $"{option.Language} · {option.DisplayName}";
+        }
+
+        var full = Path.GetFullPath(path);
+        return Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+    }
+
+    public static bool IsLargeModel(string? path) =>
+        FindOptionForPath(path)?.ConfirmLargeDownload == true
+        || EstimateRuntimeBytes(path) >= 1024L * 1024 * 1024;
+
+    public static long EstimateRuntimeBytes(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return 300L * 1024 * 1024;
+        }
+
+        var option = FindOptionForPath(path);
+        var disk = option is not null ? ParseCatalogDiskBytes(option.DisplayName) : 0;
+        if (disk <= 0)
+        {
+            disk = DirectorySize(path);
+        }
+
+        var large = option?.ConfirmLargeDownload == true || disk >= 700L * 1024 * 1024;
+        if (large)
+        {
+            return Math.Max(disk * 3, 1024L * 1024 * 1024);
+        }
+
+        return Math.Max(disk * 6, 300L * 1024 * 1024);
+    }
+
     public static VoskModelOption? FindOptionForPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -352,6 +420,39 @@ internal static class VoskModelManager
         progress?.Report(100);
         return FindModelFolder(destination)
                ?? throw new InvalidOperationException("The Vosk model downloaded but the model folder was not found.");
+    }
+
+    private static long ParseCatalogDiskBytes(string displayName)
+    {
+        var match = CatalogSizePattern.Match(displayName);
+        if (!match.Success
+            || !double.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out var value))
+        {
+            return 0;
+        }
+
+        return match.Groups[2].Value.Equals("GB", StringComparison.OrdinalIgnoreCase)
+            ? (long)(value * 1024 * 1024 * 1024)
+            : (long)(value * 1024 * 1024);
+    }
+
+    private static long DirectorySize(string path)
+    {
+        try
+        {
+            if (!Directory.Exists(path))
+            {
+                return 50L * 1024 * 1024;
+            }
+
+            return new DirectoryInfo(path)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(file => file.Length);
+        }
+        catch (Exception)
+        {
+            return 50L * 1024 * 1024;
+        }
     }
 
     private static VoskModelOption Entry(

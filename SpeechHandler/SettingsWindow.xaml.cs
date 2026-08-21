@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Win32;
 using SpeechHandler.Transcription;
 
@@ -23,6 +24,7 @@ internal partial class SettingsWindow : Window
         OpenAiKey = openAiKey;
         ElevenLabsKey = elevenLabsKey;
         InitializeComponent();
+        DataObject.AddPastingHandler(CacheBudgetBox, CacheBudgetBox_Pasting);
         LoadFromSettings();
         UpdateEnginePanels();
     }
@@ -43,6 +45,7 @@ internal partial class SettingsWindow : Window
         TranslateCheck.IsChecked = _settings.TranslateToEnglish;
         SelectComboItem(WhisperModelCombo, _settings.WhisperModel);
         SelectComboItem(ElevenLabsModelCombo, _settings.ElevenLabsModel);
+        RefreshBudgetUi();
         ApiKeyBox.Password = OpenAiKey;
         ElevenLabsApiKeyBox.Password = ElevenLabsKey;
     }
@@ -59,6 +62,7 @@ internal partial class SettingsWindow : Window
         _settings.TranslateToEnglish = TranslateCheck.IsChecked == true;
         _settings.WhisperModel = SelectedComboText(WhisperModelCombo) ?? "whisper-1";
         _settings.ElevenLabsModel = SelectedComboText(ElevenLabsModelCombo) ?? "scribe_v2";
+        TryCommitCacheBudget(showError: false);
         OpenAiKey = ApiKeyBox.Password;
         ElevenLabsKey = ElevenLabsApiKeyBox.Password;
         _settings.Save();
@@ -417,6 +421,11 @@ internal partial class SettingsWindow : Window
             return;
         }
 
+        if (!TryCommitCacheBudget(showError: true))
+        {
+            return;
+        }
+
         SaveToSettings();
         DialogResult = true;
     }
@@ -443,11 +452,138 @@ internal partial class SettingsWindow : Window
         DownloadButton.IsEnabled = !downloading;
         BrowseButton.IsEnabled = !downloading;
         EngineCombo.IsEnabled = !downloading;
+        CacheBudgetBox.IsEnabled = !downloading;
+        CacheBudgetMinus.IsEnabled = !downloading;
+        CacheBudgetPlus.IsEnabled = !downloading;
         VoskLanguageCombo.IsEnabled = !downloading;
         VoskModelCombo.IsEnabled = !downloading;
         CloseButton.IsEnabled = !downloading;
         CancelDownloadButton.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private void RefreshBudgetUi()
+    {
+        _settings.EnsureCacheBudget();
+        var total = ProcessMemory.TotalPhysicalBytes;
+        var suggested = ProcessMemory.SuggestedBudgetGigabytes();
+        var max = ProcessMemory.MaxBudgetGigabytes();
+        PhysicalRamText.Text = total > 0
+            ? $"This computer has {ProcessMemory.FormatBytes(total)} of RAM."
+            : "Could not read the amount of RAM on this computer.";
+        SuggestedRamText.Text =
+            $"Suggested cache: {suggested} GB ({ProcessMemory.AutoBudgetReason()}).";
+        CacheBudgetHint.Text =
+            $"Enter a whole number from {ProcessMemory.MinBudgetGigabytes} to {max} GB. "
+            + "The upper limit leaves memory for Windows and other apps.";
+        CacheBudgetBox.Text = _settings.ModelCacheBudgetGb.ToString();
+    }
+
+    private void CacheBudgetMinus_Click(object sender, RoutedEventArgs e) =>
+        AdjustCacheBudget(-1);
+
+    private void CacheBudgetPlus_Click(object sender, RoutedEventArgs e) =>
+        AdjustCacheBudget(1);
+
+    private void AdjustCacheBudget(int delta)
+    {
+        var current = TryReadCacheBudget(out var gigabytes)
+            ? gigabytes
+            : _settings.ModelCacheBudgetGb;
+        CacheBudgetBox.Text = ProcessMemory.ClampBudgetGigabytes(current + delta).ToString();
+    }
+
+    private void CacheBudgetBox_PreviewTextInput(object sender, TextCompositionEventArgs e) =>
+        e.Handled = e.Text.Length == 0 || !e.Text.All(char.IsDigit);
+
+    private void CacheBudgetBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private static void CacheBudgetBox_Pasting(object sender, DataObjectPastingEventArgs e)
+    {
+        if (!e.DataObject.GetDataPresent(typeof(string)))
+        {
+            e.CancelCommand();
+            return;
+        }
+
+        var text = e.DataObject.GetData(typeof(string)) as string;
+        if (string.IsNullOrEmpty(text) || !text.All(char.IsDigit))
+        {
+            e.CancelCommand();
+        }
+    }
+
+    private void CacheBudgetBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!TryCommitCacheBudget(showError: false))
+        {
+            CacheBudgetBox.Text = ProcessMemory.ClampBudgetGigabytes(
+                _settings.ModelCacheBudgetGb <= 0
+                    ? ProcessMemory.SuggestedBudgetGigabytes()
+                    : _settings.ModelCacheBudgetGb).ToString();
+        }
+    }
+
+    private bool TryCommitCacheBudget(bool showError)
+    {
+        var max = ProcessMemory.MaxBudgetGigabytes();
+        if (!TryReadCacheBudget(out var gigabytes))
+        {
+            if (showError)
+            {
+                MessageBox.Show(
+                    this,
+                    "Enter a whole number of gigabytes for the cache limit.",
+                    "Settings",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return false;
+        }
+
+        if (gigabytes < ProcessMemory.MinBudgetGigabytes)
+        {
+            if (showError)
+            {
+                MessageBox.Show(
+                    this,
+                    $"The cache limit must be at least {ProcessMemory.MinBudgetGigabytes} GB.",
+                    "Settings",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return false;
+        }
+
+        if (gigabytes > max)
+        {
+            if (showError)
+            {
+                MessageBox.Show(
+                    this,
+                    $"The cache limit cannot exceed {max} GB on this computer. A higher amount would not leave enough memory for Windows and other apps.",
+                    "Settings",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return false;
+        }
+
+        _settings.ModelCacheBudgetGb = gigabytes;
+        CacheBudgetBox.Text = gigabytes.ToString();
+        return true;
+    }
+
+    private bool TryReadCacheBudget(out int gigabytes) =>
+        int.TryParse(CacheBudgetBox.Text.Trim(), out gigabytes);
 
     private static string? SelectedComboText(ComboBox combo) =>
         (combo.SelectedItem as ComboBoxItem)?.Content?.ToString();
