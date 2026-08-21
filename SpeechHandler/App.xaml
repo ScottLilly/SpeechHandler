@@ -19,6 +19,13 @@
         <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="#E8EEF4"/>
         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2A5A8A"/>
         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="White"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.InfoBrushKey}" Color="#252B33"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.InfoTextBrushKey}" Color="#E8EEF4"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#252B33"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#E8EEF4"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1B1F24"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E8EEF4"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#9AA8B5"/>
 
         <Style TargetType="Window">
             <Setter Property="Background" Value="{StaticResource AppBg}"/>
@@ -112,6 +119,7 @@
             <Setter Property="Padding" Value="4"/>
             <Setter Property="OverridesDefaultStyle" Value="True"/>
             <Setter Property="Grid.IsSharedSizeScope" Value="False"/>
+            <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimary}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ContextMenu">
@@ -121,6 +129,32 @@
                                 Padding="{TemplateBinding Padding}">
                             <StackPanel IsItemsHost="True"
                                         KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ToolTip">
+            <Setter Property="Background" Value="{StaticResource CardBg}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="HasDropShadow" Value="False"/>
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter
+                                TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Border>
                     </ControlTemplate>
                 </Setter.Value>
