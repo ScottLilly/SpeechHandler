@@ -17,6 +17,7 @@ Windows desktop app for turning speech into text and text into speech. Transcrib
 - **Save and copy** the transcript as `.txt` or subtitles as `.srt`.
 - **Speak the transcript** with downloaded **Kokoro** or **Piper** voices, including speaking-speed control.
 - **Save spoken audio** of the transcript to a file.
+- **SSML tab** for controlling how the transcript is spoken: pauses (`<break>`), rate and volume (`<prosody>`), approximate `<emphasis>`, `<sub>`, `<p>` and `<s>`. It starts as a copy of the transcript, and a tag list inserts the supported tags at the cursor. Speak and Save audio use the SSML while that tab is selected.
 
 ## Requirements
 

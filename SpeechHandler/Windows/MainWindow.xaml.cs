@@ -64,6 +64,8 @@ public partial class MainWindow : Window
     private bool _loadingModel;
     private Task? _modelLoadTask;
     private string? _lastFinalRaw;
+    // The SSML tab follows the transcript while its text is still this generated copy.
+    private string _autoSsml = string.Empty;
     private string? _selectedAudioFile;
     private string _apiKey = string.Empty;
     private string _elevenLabsKey = string.Empty;
@@ -85,6 +87,10 @@ public partial class MainWindow : Window
         TranscriptSpelling.Attach(TranscriptBox);
         TranscriptSpelling.Attach(SrtBox, skipSrtMetadata: true);
         TranscriptSpelling.WordCorrected = SyncSpellingCorrection;
+        TranscriptBox.TextChanged += TranscriptBox_TextChanged;
+        SsmlTagList.ItemsSource = SsmlTagCatalog.Tags;
+        SsmlUnsupportedText.Text = SsmlTagCatalog.UnsupportedNote;
+        RefreshSsmlValidation();
         _vosk.CacheChanged += Vosk_CacheChanged;
         _inputLevelTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(75) };
         _inputLevelTimer.Tick += InputLevelTimer_Tick;
@@ -716,6 +722,17 @@ public partial class MainWindow : Window
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
+        if (SsmlTabSelected)
+        {
+            if (!string.IsNullOrEmpty(SsmlBox.Text))
+            {
+                Clipboard.SetText(SsmlBox.Text);
+                SetStatus("Copied SSML to the clipboard.", IdleBrush);
+            }
+
+            return;
+        }
+
         var srt = SrtTabSelected;
         var text = srt ? SrtBox.Text : TranscriptBox.Text;
         if (string.IsNullOrEmpty(text))
@@ -733,6 +750,12 @@ public partial class MainWindow : Window
         var baseName = !string.IsNullOrWhiteSpace(_selectedAudioFile)
             ? Path.GetFileNameWithoutExtension(_selectedAudioFile)
             : $"transcript-{DateTime.Now:yyyyMMdd-HHmmss}";
+        if (SsmlTabSelected)
+        {
+            SaveSsml(baseName);
+            return;
+        }
+
         var dialog = new SaveFileDialog
         {
             Title = srtSelected ? "Save subtitles" : "Save transcript",
@@ -765,10 +788,37 @@ public partial class MainWindow : Window
         SetStatus(saveSrt ? "Saved subtitles." : "Saved transcript.", IdleBrush);
     }
 
+    private void SaveSsml(string baseName)
+    {
+        if (string.IsNullOrWhiteSpace(SsmlBox.Text))
+        {
+            MessageBox.Show(this, "There is no SSML to save yet.", "Speech Handler",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save SSML",
+            Filter = "SSML files|*.ssml|XML files|*.xml|Text files|*.txt|All files|*.*",
+            FileName = $"{baseName}.ssml"
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        File.WriteAllText(dialog.FileName, SsmlBox.Text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        SetStatus("Saved SSML.", IdleBrush);
+    }
+
     private void Clear_Click(object sender, RoutedEventArgs e)
     {
         TranscriptBox.Clear();
         SrtBox.Clear();
+        _autoSsml = string.Empty;
+        SsmlBox.Clear();
         _timedWords.Clear();
         PartialText.Text = string.Empty;
         _lastFinalRaw = null;
@@ -792,7 +842,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!TryGetTranscriptAndVoice(out var text, out var voice))
+        if (!TryGetSpeechAndVoice(out var text, out var ssml, out var voice))
         {
             return;
         }
@@ -804,7 +854,7 @@ public partial class MainWindow : Window
         var generation = _workGeneration;
         try
         {
-            var wavPath = await SynthesizeTranscriptWavAsync(text, voice, cts.Token);
+            var wavPath = await SynthesizeTranscriptWavAsync(text, ssml, voice, cts.Token);
             HideOverlay();
             await PlayTtsAsync(wavPath, cts.Token);
             if (!cts.IsCancellationRequested)
@@ -839,7 +889,7 @@ public partial class MainWindow : Window
             StopTtsPlayback();
         }
 
-        if (!TryGetTranscriptAndVoice(out var text, out var voice))
+        if (!TryGetSpeechAndVoice(out var text, out var ssml, out var voice))
         {
             return;
         }
@@ -874,7 +924,7 @@ public partial class MainWindow : Window
         var wavPath = Path.Combine(Path.GetTempPath(), $"speechhandler-tts-{Guid.NewGuid():N}.wav");
         try
         {
-            await SynthesizeTranscriptWavAsync(text, voice, cts.Token, wavPath);
+            await SynthesizeTranscriptWavAsync(text, ssml, voice, cts.Token, wavPath);
             ProcessingMessage.Text = "Writing audio file…";
             SetStatus("Writing audio file…", ProcessingBrush);
             await Task.Run(() => AudioFormatWriter.WriteFromWav(wavPath, dialog.FileName), cts.Token);
@@ -906,13 +956,31 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool TryGetTranscriptAndVoice(out string text, out TtsVoiceOption voice)
+    /// <summary>
+    /// The SSML tab speaks its SSML; the Transcript and Subtitles tabs speak the transcript.
+    /// </summary>
+    private bool TryGetSpeechAndVoice(out string text, out SsmlDocument? ssml, out TtsVoiceOption voice)
     {
         text = TranscriptBox.Text.Trim();
+        ssml = null;
         voice = TtsVoiceCombo.SelectedItem as TtsVoiceOption
                 ?? TtsVoiceCatalog.FindVoice(_settings.TtsVoiceId)
                 ?? TtsVoiceCatalog.FindVoice(TtsVoiceCatalog.DefaultVoiceId)
                 ?? TtsVoiceCatalog.Voices[0];
+
+        if (SsmlTabSelected)
+        {
+            try
+            {
+                ssml = SsmlParser.Parse(SsmlBox.Text);
+                return true;
+            }
+            catch (SsmlException ex)
+            {
+                MessageBox.Show(this, ex.Message, "Speech Handler", MessageBoxButton.OK, MessageBoxImage.Information);
+                return false;
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -926,6 +994,7 @@ public partial class MainWindow : Window
 
     private async Task<string> SynthesizeTranscriptWavAsync(
         string text,
+        SsmlDocument? ssml,
         TtsVoiceOption voice,
         CancellationToken cancellationToken,
         string? wavPath = null)
@@ -942,6 +1011,12 @@ public partial class MainWindow : Window
 
         wavPath ??= Path.Combine(Path.GetTempPath(), $"speechhandler-tts-{Guid.NewGuid():N}.wav");
         var speed = (float)(_settings.TtsSpeed <= 0 ? 1.0 : _settings.TtsSpeed);
+        if (ssml is not null)
+        {
+            await SsmlRenderer.RenderAsync(ssml, voice.Engine, speed, wavPath, status, cancellationToken);
+            return wavPath;
+        }
+
         await voice.Engine.SynthesizeWavFileAsync(text, wavPath, speed, cancellationToken);
         return wavPath;
     }
@@ -1016,7 +1091,7 @@ public partial class MainWindow : Window
 
         if (!_ttsWork)
         {
-            SpeakButton.Content = "Speak transcript";
+            SpeakButton.Content = SpeakButtonIdleText;
         }
 
         UpdateActionButtons();
@@ -2017,7 +2092,7 @@ public partial class MainWindow : Window
         _ttsWork = false;
         _loadingModel = false;
         HideOverlay();
-        SpeakButton.Content = "Speak transcript";
+        SpeakButton.Content = SpeakButtonIdleText;
         UpdateActionButtons();
         if (!_closing)
         {
@@ -2241,6 +2316,103 @@ public partial class MainWindow : Window
     }
 
     private bool SrtTabSelected => TranscriptViewTabs.SelectedIndex == 1;
+
+    private bool SsmlTabSelected => TranscriptViewTabs.SelectedIndex == 2;
+
+    private string SpeakButtonIdleText => SsmlTabSelected ? "Speak SSML" : "Speak transcript";
+
+    private void TranscriptViewTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, TranscriptViewTabs) || SpeakButton is null)
+        {
+            return;
+        }
+
+        if (!_ttsPlaying && !_ttsWork)
+        {
+            SpeakButton.Content = SpeakButtonIdleText;
+        }
+    }
+
+    private void TranscriptBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!string.Equals(SsmlBox.Text, _autoSsml, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _autoSsml = SsmlParser.FromPlainText(TranscriptBox.Text);
+        SsmlBox.Text = _autoSsml;
+    }
+
+    private void SsmlBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshSsmlValidation();
+
+    private void RefreshSsmlValidation()
+    {
+        SsmlValidationText.Foreground = (Brush)FindResource("TextMuted");
+        if (string.IsNullOrWhiteSpace(SsmlBox.Text))
+        {
+            SsmlValidationText.Text = "Transcribed text appears here. You can also type or paste SSML.";
+            return;
+        }
+
+        try
+        {
+            var document = SsmlParser.Parse(SsmlBox.Text);
+            var summary = $"Valid. {document.SpokenPartCount} spoken part{(document.SpokenPartCount == 1 ? "" : "s")}, " +
+                          $"{document.PauseSeconds:0.##} s of added pauses.";
+            if (string.Equals(SsmlBox.Text, _autoSsml, StringComparison.Ordinal))
+            {
+                summary += " Kept in step with the transcript until you edit it here.";
+            }
+
+            SsmlValidationText.Text = document.Warnings.Count == 0
+                ? summary
+                : summary + " " + string.Join(" ", document.Warnings);
+        }
+        catch (SsmlException ex)
+        {
+            SsmlValidationText.Foreground = ErrorBrush;
+            SsmlValidationText.Text = ex.Message;
+        }
+    }
+
+    private void ReloadSsml_Click(object sender, RoutedEventArgs e)
+    {
+        var edited = !string.IsNullOrWhiteSpace(SsmlBox.Text)
+                     && !string.Equals(SsmlBox.Text, _autoSsml, StringComparison.Ordinal);
+        if (edited && MessageBox.Show(
+                this,
+                "Replace the SSML you edited with the current transcript?",
+                "Speech Handler",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Question) != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        _autoSsml = SsmlParser.FromPlainText(TranscriptBox.Text);
+        SsmlBox.Text = _autoSsml;
+    }
+
+    private void SsmlTag_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not SsmlTag tag)
+        {
+            return;
+        }
+
+        var start = SsmlBox.SelectionStart;
+        var selected = SsmlBox.SelectedText;
+        var inserted = tag.Open + selected + tag.Close;
+        SsmlBox.SelectedText = inserted;
+
+        // With nothing selected, leave the caret between the opening and closing tags.
+        SsmlBox.Select(
+            tag.Close.Length > 0 && selected.Length == 0 ? start + tag.Open.Length : start + inserted.Length,
+            0);
+        SsmlBox.Focus();
+    }
 
     private void ApplyTranscriptLanguage(string? language)
     {

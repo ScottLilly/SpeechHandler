@@ -226,6 +226,10 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource CardBg}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <!-- The thicker border is taken out of the padding so the label does not shift. -->
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="2,2,0,2"/>
+                                <Setter Property="Padding" Value="11,9,12,9"/>
                                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                             </Trigger>
@@ -272,7 +276,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="Bd"
-                                Background="#1A1F25"
+                                Background="Transparent"
                                 BorderBrush="{StaticResource CardBorder}"
                                 BorderThickness="1,1,1,0"
                                 CornerRadius="8,8,0,0"
@@ -283,6 +287,10 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource FieldBg}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <!-- The thicker border is taken out of the padding so the label does not shift. -->
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="2,2,2,0"/>
+                                <Setter Property="Padding" Value="13,7,13,8"/>
                                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                             </Trigger>
